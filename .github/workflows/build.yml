@@ -1,0 +1,71 @@
+name: Build Tenda BE12 Pro ImmortalWrt
+
+on:
+  workflow_dispatch:
+  schedule:
+    # Beijing Monday, Wednesday, Friday 02:00 = previous UTC day 18:00.
+    - cron: '0 18 * * 0,2,4'
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 360
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Free runner disk space
+        run: |
+          sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc /usr/local/share/powershell
+          df -h .
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential bison flex gawk gcc-multilib g++-multilib gettext git libncurses-dev libssl-dev python3 python3-setuptools rsync unzip zlib1g-dev file wget curl subversion swig time
+
+      - name: Clone ImmortalWrt master and update feeds
+        run: |
+          git clone --depth=1 --branch master https://github.com/immortalwrt/immortalwrt.git immortalwrt
+          cd immortalwrt
+          ./scripts/feeds update -a
+          ./scripts/feeds install -a
+
+      - name: Configure official latest Xray binary
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          cp tendabe12pro.config immortalwrt/.config
+          python3 scripts/prepare_xray.py immortalwrt
+          cd immortalwrt
+          make defconfig
+          python3 ../scripts/check_config.py .config
+          python3 ../scripts/record_sources.py . ../tendabe12pro.config
+
+      - name: Download build sources
+        working-directory: immortalwrt
+        run: make download -j8 V=s
+
+      - name: Build firmware
+        working-directory: immortalwrt
+        run: make -j"$(nproc)" V=s || make -j1 V=s
+
+      - name: Verify Xray and collect firmware
+        run: python3 scripts/collect_outputs.py immortalwrt release
+
+      - name: Write Release notes
+        run: python3 scripts/release_notes.py release release-notes.md
+
+      - name: Publish GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          tag="build-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          gh release create "$tag" release/* \
+            --repo "$GITHUB_REPOSITORY" \
+            --target "$GITHUB_SHA" \
+            --title "Tenda BE12 Pro $(date -u +%Y-%m-%d) #${GITHUB_RUN_NUMBER}" \
+            --notes-file release-notes.md \
+            --prerelease
