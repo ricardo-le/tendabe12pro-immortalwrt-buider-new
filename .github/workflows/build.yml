@@ -51,9 +51,23 @@ jobs:
       - name: Build pahole
         run: |
           git clone --depth=1 --branch v1.32 https://github.com/acmel/dwarves.git /tmp/dwarves
-          cmake -S /tmp/dwarves -B /tmp/dwarves/build -DCMAKE_BUILD_TYPE=Release
+          # dwarves never defines LIB_INSTALL_DIR, so install() would fall back
+          # to a default we do not control; pin it to lib/ next to the prefix.
+          cmake -S /tmp/dwarves -B /tmp/dwarves/build \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DLIB_INSTALL_DIR=lib
           cmake --build /tmp/dwarves/build -j"$(nproc)"
           sudo cmake --install /tmp/dwarves/build
+          # install() strips the build-tree RPATH, so pahole finds
+          # libdwarves*.so.1 only through ld.so.cache. The runner image was
+          # built before these libraries existed, hence "cannot open shared
+          # object file" / exit 127 without this.
+          sudo ldconfig
+          if ldd "$(command -v pahole)" | grep -q 'not found'; then
+            ldd "$(command -v pahole)"
+            echo "pahole cannot resolve its dwarves libraries" >&2
+            exit 1
+          fi
           pahole --version
 
       - name: Clone ImmortalWrt master and update feeds

@@ -125,9 +125,14 @@ Debian 11 自带 1.22 不可用）。本地编译同样需要：
 
 ```sh
 git clone --depth=1 -b v1.32 https://github.com/acmel/dwarves.git
-cmake -S dwarves -B dwarves/build -DCMAKE_BUILD_TYPE=Release
+cmake -S dwarves -B dwarves/build -DCMAKE_BUILD_TYPE=Release -DLIB_INSTALL_DIR=lib
 cmake --build dwarves/build -j"$(nproc)" && sudo cmake --install dwarves/build
+sudo ldconfig   # 否则 pahole 报 libdwarves_emit.so.1: cannot open shared object file
 ```
+
+`cmake --install` 会把 `libdwarves*.so.1` 装到 `/usr/local/lib`，并去掉 build 目录的
+RPATH；`/usr/local/lib` 虽然在 `/etc/ld.so.conf.d/libc.conf` 里，但新装的库要跑一次
+`ldconfig` 才会进缓存，否则 `pahole` 直接以 127 退出。
 
 ## 流水线里的硬性检查
 
