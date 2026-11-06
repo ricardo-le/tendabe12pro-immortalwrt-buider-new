@@ -7,6 +7,7 @@ Usage: collect_outputs.py <immortalwrt-root> <destination> <variant>
 import hashlib
 import json
 import pathlib
+import re
 import shutil
 import sys
 import tarfile
@@ -19,32 +20,43 @@ KERNEL_LIMIT = variants.KERNEL_PARTITION_BYTES
 
 
 def kernel_size(image):
-    """Size of the kernel member of the sysupgrade tar, or None."""
+    """Size of the kernel member of the sysupgrade tar, or None.
+
+    A None result is a hard failure in collect(): silently skipping the size
+    check would defeat the guarantee that no unbootable image is published.
+    """
     try:
-        with tarfile.open(image, 'r:') as archive:
+        with tarfile.open(image, 'r:*') as archive:
             for member in archive.getmembers():
                 if member.name.rsplit('/', 1)[-1] == 'kernel':
                     return member.size
-    except tarfile.TarError:
+    except (tarfile.TarError, OSError):
         return None
     return None
 
 
 def check_kernel(root, variant):
-    """honk needs kernel options the .config cannot express; verify them."""
-    if variant != 'honk':
-        return {}
+    """Record the built kernel version; honk additionally needs BPF options."""
     configs = list(root.glob('build_dir/target-*/linux-*/linux-*/.config'))
     if len(configs) != 1:
-        sys.exit(f'Expected one kernel .config, found {len(configs)}.')
+        if variant == 'honk':
+            sys.exit(f'Expected one kernel .config, found {len(configs)}.')
+        return {}
     text = configs[0].read_text()
+    info = {'kernel_config': str(configs[0].relative_to(root))}
+    match = re.search(r'linux-(\d+\.\d+(?:\.\d+)?)', str(configs[0]))
+    if match:
+        info['kernel_version'] = match.group(1)
+    if variant != 'honk':
+        return info
     if 'CONFIG_CGROUP_BPF=y' not in text:
         sys.exit('The built kernel has no CONFIG_CGROUP_BPF=y; honk cannot start on it.')
     if 'CONFIG_DEBUG_INFO=y' not in text:
         sys.exit('The built kernel has no CONFIG_DEBUG_INFO=y; the BTF blob would be useless.')
     if 'CONFIG_DEBUG_INFO_REDUCED=y' in text:
         sys.exit('The built kernel uses DEBUG_INFO_REDUCED; pahole cannot produce full BTF.')
-    return {'kernel_config': str(configs[0].relative_to(root)), 'cgroup_bpf': True}
+    info['cgroup_bpf'] = True
+    return info
 
 
 def check_btf(root):
@@ -82,13 +94,15 @@ def collect(root, destination, variant):
     if not sysupgrade:
         sys.exit('No Tenda BE12 Pro sysupgrade image was produced.')
 
-    measured = kernel_size(sysupgrade[0])
-    if measured is None:
-        print('warning: could not read the kernel size from the sysupgrade image', file=sys.stderr)
-    elif measured >= KERNEL_LIMIT:
+    sizes = [kernel_size(image) for image in sysupgrade]
+    if any(size is None for size in sizes):
+        sys.exit(f'Could not read the kernel size from {sysupgrade[0].name}; '
+                 'refusing to publish an unchecked image.')
+    measured = max(sizes)
+    if measured >= KERNEL_LIMIT:
         sys.exit(f'The kernel is {measured / 1048576:.2f} MB but the partition holds '
                  f'{KERNEL_LIMIT / 1048576:.0f} MB; the image would not boot.')
-    elif measured > KERNEL_LIMIT * 0.95:
+    if measured > KERNEL_LIMIT * 0.95:
         print(f'warning: the kernel is {measured / 1048576:.2f} MB of '
               f'{KERNEL_LIMIT / 1048576:.0f} MB', file=sys.stderr)
 
@@ -120,7 +134,7 @@ def collect(root, destination, variant):
     (destination / 'variant.json').write_text(json.dumps(record, indent=2) + '\n')
     print(f'{variant}: collected {len(images)} device files, '
           f'{spec["payload"]} SHA-256 matches {payload["tag"]}, '
-          f'kernel {measured and round(measured / 1048576, 2)} MB')
+          f'kernel {measured / 1048576:.2f} MB')
 
 
 if __name__ == '__main__':

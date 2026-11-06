@@ -12,8 +12,9 @@
 # (GPL-3.0-or-later) so that the init script, the UCI file and the runtime
 # paths match what that feed installs.
 
-# $(CURDIR) is the buildroot top directory and $(MAKEFILE_LIST) grows with
-# every include, so resolve this directory before the first include.
+# Resolve this directory before any include: $(MAKEFILE_LIST) grows with every
+# included Makefile, and $(CURDIR) depends on which make phase is parsing it,
+# so neither is reliable later on.
 PKG_DIR:=$(patsubst %/,%,$(dir $(abspath $(lastword $(MAKEFILE_LIST)))))
 
 include $(TOPDIR)/rules.mk

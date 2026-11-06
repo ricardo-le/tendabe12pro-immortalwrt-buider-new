@@ -8,7 +8,8 @@ Tenda BE12 Pro（mt7987a / mediatek-filogic）的 ImmortalWrt 固件，用 GitHu
 | `passwall` | Passwall + 官方最新 Xray 内核 | 原有固件，行为不变 | `passwall-` |
 | `honk` | [daeuniverse/honk](https://github.com/daeuniverse/honk) | **完全不含 Passwall 全家桶**（也不含 Xray），带内嵌 doona 面板 | `honk-` |
 
-两个变体共用同一份 ImmortalWrt master 检出与同一批 feeds，只是包选择和内核选项不同。
+两个变体在**各自的 runner** 上拉取同一时间点的 ImmortalWrt master 与 feeds（不保证完全
+相同的提交，Release 说明按变体分别列出实际 commit），只是包选择和内核选项不同。
 两个变体都**不含 AdGuardHome**（`adguardhome` 与 `luci-app-adguardhome`），
 `check_config.py` 会把它列为禁止项，避免以后从菜单里误选回来。
 
@@ -38,7 +39,8 @@ scripts/release_notes.py        # 生成双变体 Release 说明
   里 `DEFAULT_TAG` 钉住的版本。默认钉版本是为了可复现，不会自己漂。
 - 定时：每周一、三、五 02:00（北京时间）。
 
-两个变体并行跑，任何一个失败都不会影响另一个的产物发布；Release 说明里只会列出成功的变体。
+两个变体并行跑，任何一个失败都不会影响另一个的产物发布；Release 说明里只会列出成功的变体，
+并分别标注各自的源码提交与 feed 提交。
 
 ## 产物
 
@@ -47,8 +49,11 @@ Release 里所有附件都带变体前缀，例如：
 ```
 passwall-immortalwrt-mediatek-filogic-tenda_be12-pro-squashfs-sysupgrade.bin
 honk-immortalwrt-mediatek-filogic-tenda_be12-pro-squashfs-sysupgrade.bin
-passwall-…​.manifest / honk-…​.manifest
+passwall-…initramfs-kernel.bin / honk-…initramfs-kernel.bin   # 恢复用
+passwall-…manifest / honk-…manifest
 passwall-source-metadata.json / honk-source-metadata.json
+passwall-variant.json / honk-variant.json
+xray-release.json / honk-release.json
 SHA256SUMS
 ```
 
@@ -91,8 +96,8 @@ target 的内核配置文件：OpenWrt 的 `Kernel/Configure/Default` 会用 awk
 - 面板：`http://<路由器 LAN IP>:9527/`（内嵌 doona，首次访问创建管理员，
   默认只走 HTTP，防火墙默认不放行 WAN）。
 - 配置文件 `/etc/honk/config.dae`，UCI 只有 `honk.config.config_file` 一项。
-- 运行时要求：内核 6.12+（本固件 6.18 ✅）、cgroup v2、bpffs、
-  内核 BTF。首启脚本会自动挂 bpffs 与 cgroup2。
+- 运行时要求：内核 6.12+（实际版本由 ImmortalWrt master 决定，见 Release 说明里
+  的 `kernel_version`）、cgroup v2、bpffs、内核 BTF。首启脚本会自动挂 bpffs 与 cgroup2。
 - honk 当前是 alpha（`v0.1.0-beta.5`），上游明确不建议生产使用；
   首次部署请保留带外管理通道（串口/SSH 兜底）。
 - 二进制是官方静态 musl aarch64 `full` 构建（Clash API + 原生 API + 内嵌 doona），
@@ -105,7 +110,7 @@ target 的内核配置文件：OpenWrt 的 `Kernel/Configure/Default` 会用 awk
 装到 `/usr/lib/debug/boot/vmlinux`（honk 会查这个路径），体积落在 rootfs 里。
 代价是内核要用完整 DWARF 编译（`DEBUG_INFO_REDUCED` 关闭），构建时间和磁盘占用略增。
 
-**pahole 必须 ≥ 1.24**：内核 6.18 用 GCC 14 编译会产出 `DW_TAG_unspecified_type`，
+**pahole 必须 ≥ 1.24**：GCC 14 编译的 6.12+ 内核会产出 `DW_TAG_unspecified_type`，
 1.22 及更早版本直接报 `Unsupported DW_TAG_unspecified_type` 中断。CI 里从源码编译
 dwarves v1.32 并装到 `/usr/local/bin`，不依赖发行版版本（Ubuntu 24.04 自带 1.25 恰好可用，
 Debian 11 自带 1.22 不可用）。本地编译同样需要：
@@ -128,7 +133,8 @@ cmake --build dwarves/build -j"$(nproc)" && sudo cmake --install dwarves/build
 - 内核（仅 honk）：`CONFIG_CGROUP_BPF=y`、`CONFIG_DEBUG_INFO=y`、
   `DEBUG_INFO_REDUCED` 已关；
 - BTF：magic 为 `9feb` 且不小于 512 KB；
-- 内核体积：从 sysupgrade tar 里读 `kernel` 成员，超过 6 MB 分区直接失败，超过 95% 告警；
+- 内核体积：逐一读取每个 sysupgrade 镜像里 `kernel` 成员，超过 6 MB 分区直接失败，
+  超过 95% 告警；**读不出内核尺寸也直接失败**，不会静默跳过；
 - feeds 漂移只告警不中断（原实现会因为 feed 恰好更新而随机失败）。
 
 ## 已知限制

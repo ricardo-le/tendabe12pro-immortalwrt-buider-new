@@ -27,7 +27,7 @@ jobs:
   build:
     name: build (${{ matrix.variant }})
     runs-on: ubuntu-24.04
-    timeout-minutes: 420
+    timeout-minutes: 360
     strategy:
       fail-fast: false
       matrix:
@@ -97,11 +97,22 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Download firmware artifacts
+      # Download each artifact into a fixed directory. A pattern download with
+      # a single match would flatten the files into release/ (v4 behaviour),
+      # which breaks staging when the other variant failed.
+      - name: Download passwall firmware
         uses: actions/download-artifact@v4
+        continue-on-error: true
         with:
-          path: release
-          pattern: firmware-*
+          name: firmware-passwall
+          path: release/firmware-passwall
+
+      - name: Download honk firmware
+        uses: actions/download-artifact@v4
+        continue-on-error: true
+        with:
+          name: firmware-honk
+          path: release/firmware-honk
 
       - name: Stage release assets
         run: python3 scripts/stage_release.py release upload

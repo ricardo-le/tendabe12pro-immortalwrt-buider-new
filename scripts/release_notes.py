@@ -3,8 +3,10 @@
 
 Usage: release_notes.py <release-dir> <output.md>
 
-<release-dir> holds one subdirectory per variant (passwall/, honk/), each with
-variant.json, source-metadata.json and the payload release metadata.
+Normally <release-dir> holds one subdirectory per variant (firmware-passwall/,
+firmware-honk/), each with variant.json, source-metadata.json and the payload
+release metadata. A single-artifact download may instead flatten the files into
+<release-dir> itself; that layout is accepted too.
 """
 
 import json
@@ -16,20 +18,28 @@ TITLES = {'passwall': 'Passwall + Xray', 'honk': 'honk（无 Passwall）'}
 
 
 def load(release_dir):
+    flat_variant = None
+    flat_record = release_dir / 'variant.json'
+    if flat_record.is_file():
+        try:
+            flat_variant = json.loads(flat_record.read_text()).get('variant')
+        except json.JSONDecodeError:
+            pass
+
     found = {}
     for variant in ORDER:
-        # artifacts land as firmware-<variant>/ when downloaded from Actions,
-        # and as <variant>/ when prepared by hand.
-        directory = release_dir / f'firmware-{variant}'
-        if not directory.is_dir():
-            directory = release_dir / variant
-        if not (directory / 'variant.json').is_file():
+        candidates = [release_dir / f'firmware-{variant}', release_dir / variant]
+        if flat_variant == variant:
+            candidates.insert(0, release_dir)
+        directory = next((p for p in candidates if (p / 'variant.json').is_file()), None)
+        if directory is None:
             continue
-        payload = json.loads((directory / 'variant.json').read_text())['payload']
+        record = json.loads((directory / 'variant.json').read_text())
+        payload = json.loads((directory / f'{record["payload"]}-release.json').read_text())
         found[variant] = {
-            'variant': json.loads((directory / 'variant.json').read_text()),
+            'variant': record,
             'source': json.loads((directory / 'source-metadata.json').read_text()),
-            'payload': json.loads((directory / f'{payload}-release.json').read_text()),
+            'payload': payload,
         }
     if not found:
         sys.exit(f'no variant metadata under {release_dir}')
@@ -50,7 +60,11 @@ def overview(found):
 def variant_section(variant, data):
     source, record, payload = data['source'], data['variant'], data['payload']
     lines = [f'## {TITLES[variant]}', '']
+    lines.append(f'- ImmortalWrt：`{source["immortalwrt_branch"]}` @ `{source["immortalwrt_commit"]}`')
     lines.append(f'- 配置 SHA-256：`{source["input_config_sha256"]}`')
+    version = record.get('kernel_version')
+    if version:
+        lines.append(f'- 内核版本：`{version}`')
     if variant == 'passwall':
         lines.append(f'- Passwall feed 版本：`{source["passwall_version"]}`')
         lines.append(f'- Xray 官方版本：`{payload["tag"]}`'
@@ -77,17 +91,36 @@ def variant_section(variant, data):
     return lines
 
 
+def source_section(found):
+    """Each matrix job clones master independently, so list them separately."""
+    lines = ['## 源码与 feed', '']
+    for variant, data in found.items():
+        lines.append(f'### {TITLES[variant]}')
+        lines.append('')
+        for name, feed in data['source']['feeds'].items():
+            lines.append(f'- {name}：`{feed["branch"]}` @ `{feed["commit"]}`')
+        lines.append('')
+    return lines
+
+
 def main(release_dir, output):
     release_dir = pathlib.Path(release_dir)
     found = load(release_dir)
     first = next(iter(found.values()))['source']
+
+    if len(found) == 2:
+        summary = ('- 本次发布包含两套互斥固件，文件名分别以 `passwall-` 和 `honk-` 开头，'
+                   '刷机时任选其一。')
+    else:
+        only = next(iter(found))
+        summary = (f'- 本次发布只包含 **{only}** 一个变体（另一变体本次构建失败），'
+                   f'附件文件名以 `{only}-` 开头。')
+
     lines = [
         '# Tenda BE12 Pro ImmortalWrt 固件',
         '',
         f'- ImmortalWrt 分支：`{first["immortalwrt_branch"]}`',
-        f'- ImmortalWrt 提交：`{first["immortalwrt_commit"]}`',
-        '- 本次发布包含两套互斥固件，文件名分别以 `passwall-` 和 `honk-` 开头，'
-        '刷机时任选其一。',
+        summary,
         '',
         '## 版本速览',
         '',
@@ -98,11 +131,8 @@ def main(release_dir, output):
         lines += variant_section(variant, data)
         lines.append('')
 
-    lines += ['## 源码与 feed', '']
-    for name, feed in first['feeds'].items():
-        lines.append(f'- {name}：`{feed["branch"]}` @ `{feed["commit"]}`')
+    lines += source_section(found)
     lines += [
-        '',
         '插件版本来自上述提交；独立上游项目可能已有尚未进入 ImmortalWrt 的更新。',
         '附件中的 `.manifest` 列出实际安装的软件包版本，`source-metadata.json` 记录完整提交，',
         '`SHA256SUMS` 用于校验全部附件。',
@@ -111,10 +141,15 @@ def main(release_dir, output):
         '',
         '- 仅适用于 Tenda BE12 Pro（mt7987a，mediatek/filogic），请勿刷到其他机型。',
         '- 内核分区只有 6 MB，流水线会在内核超出分区时直接失败，不会产出无法启动的镜像。',
-        '- honk 版要求内核 6.12 以上：本固件是 6.18，满足要求；'
-        '回退到更老的官方固件后 honk 将无法启动。',
     ]
-    drift = [note for note in first.get('drift_notes', [])]
+    versions = sorted({d['variant'].get('kernel_version') for d in found.values()
+                       if d['variant'].get('kernel_version')})
+    kernel_note = ('、'.join(versions) if versions else '本次 ImmortalWrt master 构建的内核')
+    lines.append(f'- honk 版要求内核 6.12 以上：本次内核为 {kernel_note}；'
+                 '回退到更老的官方固件后 honk 将无法启动。')
+
+    drift = [note for data in found.values()
+             for note in data['source'].get('drift_notes', [])]
     if drift:
         lines += ['', '## 构建期间的源码漂移', '']
         lines += [f'- {note}' for note in drift]

@@ -9,11 +9,30 @@ Usage: stage_release.py <release-dir> <upload-dir>
 """
 
 import hashlib
+import json
 import pathlib
 import shutil
 import sys
 
 SKIP = {'SHA256SUMS'}
+
+
+def groups(release_dir):
+    """Return (directory, variant) pairs for both supported layouts.
+
+    The publish job downloads each artifact into its own directory. Keep a
+    fallback for a single-artifact pattern download, where download-artifact@v4
+    flattens the files into release/ itself.
+    """
+    groups = [(p, p.name.removeprefix('firmware-'))
+              for p in sorted(release_dir.iterdir()) if p.is_dir()]
+    record = release_dir / 'variant.json'
+    if record.is_file():
+        try:
+            groups.append((release_dir, json.loads(record.read_text())['variant']))
+        except (KeyError, json.JSONDecodeError):
+            pass
+    return groups
 
 
 def main(release_dir, upload_dir):
@@ -25,8 +44,7 @@ def main(release_dir, upload_dir):
 
     staged = 0
     variants = []
-    for directory in sorted(p for p in release_dir.iterdir() if p.is_dir()):
-        variant = directory.name.removeprefix('firmware-')
+    for directory, variant in groups(release_dir):
         files = [p for p in sorted(directory.iterdir()) if p.is_file() and p.name not in SKIP]
         if not files:
             continue
