@@ -10,9 +10,18 @@ They are the LuCI entry point for the `honk` package in this repository:
 `luci-lib-daeuniverse` is the shared page it is built on, including the
 `/usr/libexec/daeuniverse-pkg` helper that reads package state through apk.
 
-Why not add the upstream feed instead: it also ships its own `honk` package,
-which would collide with the local `package/honk`. Only these two LuCI packages
-are taken, so the honk binary, init script and UCI file stay under our control.
+Why not add the upstream feed instead: the feed also ships its own `honk`
+package, and buildroot keys every package by `PKG_NAME`, which is global. What
+happens then depends on the installer, not on us: `scripts/feeds` scans the
+core tree first and skips a feed package whose name already exists
+(`WARNING: Not overriding core package 'honk'; use -f to force`), so nothing
+breaks today -- unless someone passes `-f` or the feed is declared `--force`,
+in which case the feed version is linked in and wins. That version is a
+different package altogether: Rust sources compiled with a pinned nightly
+toolchain plus its own init script, UCI defaults, `config.dae` and the
+`vmlinux-btf*` packages. Only these two LuCI packages are taken, so the honk
+binary, init script and UCI file stay under our control and no third-party feed
+enters the build at all.
 
 Both packages are GPL-3.0-or-later, like the local honk package.
 
