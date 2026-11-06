@@ -7,7 +7,8 @@ Everything here is deterministic and verified:
   passed via HONK_TAG), its SHA-256 is checked against the release's own
   SHA256SUMS asset and against the digest GitHub reports for the asset, and the
   ELF header is checked to be a 64-bit little-endian AArch64 executable;
-* the local packages (honk, vmlinux-btf-local) are copied into the buildroot.
+* the local packages (honk, vmlinux-btf-local) and the vendored LuCI packages
+  (luci-lib-daeuniverse, luci-app-honk) are copied into the buildroot.
 
 Kernel options are not touched here: CONFIG_KERNEL_* in the variant config is
 the supported way to change the kernel, because Kernel/Configure/Default copies
@@ -214,7 +215,7 @@ def prepare(root, repo, tag=None):
     }
     (prebuilt / 'release.json').write_text(json.dumps(metadata, indent=2) + '\n')
 
-    for package in ('honk', 'vmlinux-btf-local'):
+    for package in ('honk', 'vmlinux-btf-local', 'luci-lib-daeuniverse', 'luci-app-honk'):
         shutil.copytree(repo / 'package' / package, root / 'package' / package, dirs_exist_ok=True)
     (root / 'package/honk/version.mk').write_text(
         '# Written by scripts/prepare_honk.py; mirrors honk-prebuilt/release.json.\n'

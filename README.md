@@ -6,7 +6,7 @@ Tenda BE12 Pro（mt7987a / mediatek-filogic）的 ImmortalWrt 固件，用 GitHu
 | 变体 | 代理组件 | 说明 | 文件前缀 |
 | --- | --- | --- | --- |
 | `passwall` | Passwall + 官方最新 Xray 内核 | 原有固件，行为不变 | `passwall-` |
-| `honk` | [daeuniverse/honk](https://github.com/daeuniverse/honk) | **完全不含 Passwall 全家桶**（也不含 Xray），带内嵌 doona 面板 | `honk-` |
+| `honk` | [daeuniverse/honk](https://github.com/daeuniverse/honk) | **完全不含 Passwall 全家桶**（也不含 Xray），LuCI 里多一个「服务 → honk」入口，带内嵌 doona 面板 | `honk-` |
 
 两个变体在**各自的 runner** 上拉取同一时间点的 ImmortalWrt master 与 feeds（不保证完全
 相同的提交，Release 说明按变体分别列出实际 commit），只是包选择和内核选项不同。
@@ -21,6 +21,8 @@ tendabe12pro.config             # passwall 变体配置（基准配置，menucon
 tendabe12pro-honk.config        # honk 变体配置（由脚本派生，勿手改）
 package/honk/                   # honk 本地包：预编译 honk-core + 首启脚本 + 默认配置
 package/vmlinux-btf-local/      # 把本次内核的 BTF 装进 rootfs（不占 6MB 内核分区）
+package/luci-app-honk/          # LuCI 页面：服务 → honk（上游 vendored，见 package/VENDORED.md）
+package/luci-lib-daeuniverse/   # 上面那个页面的共享实现与 daeuniverse-pkg 助手
 scripts/prepare.py              # 变体准备总入口（CI 调它）
 scripts/prepare_xray.py         # 替换 feed 里源码编译的 Xray 为官方二进制
 scripts/prepare_honk.py         # 下载校验 honk 最新发布、铺设本地包
@@ -89,8 +91,8 @@ cd .. && python3 scripts/derive_honk_config.py
    `shadowsocks-rust-*`、`simple-obfs-client`、`v2ray-plugin`、`geoview`、`chinadns-ng`、
    `dns2socks`、`microsocks`、`xray-core`；
 2. 关掉 `CONFIG_KERNEL_DEBUG_INFO_REDUCED`（pahole 需要完整 DWARF 才能生成 BTF）；
-3. 加上 `honk`、`vmlinux-btf-local`、`kmod-veth`、`kmod-nft-queue`、
-   `kmod-nfnetlink-queue`、`v2ray-geoip`、`v2ray-geosite`。
+3. 加上 `honk`、`vmlinux-btf-local`、`luci-lib-daeuniverse`、`luci-app-honk`、
+   `kmod-veth`、`kmod-nft-queue`、`kmod-nfnetlink-queue`、`v2ray-geoip`、`v2ray-geosite`。
 
 honk 需要的 `CONFIG_CGROUP_BPF` 通过 `CONFIG_KERNEL_CGROUP_BPF=y` 打开，不需要改
 target 的内核配置文件：OpenWrt 的 `Kernel/Configure/Default` 会用 awk 把 `.config`
@@ -99,7 +101,11 @@ target 的内核配置文件：OpenWrt 的 `Kernel/Configure/Default` 会用 awk
 
 ## honk 版说明
 
-- **服务默认关闭**。刷完先改 `/etc/honk/config.dae`，再
+- **LuCI 入口：服务 → honk**。页面里可以启停服务、切换开机自启、直接编辑
+  `/etc/honk/config.dae` 及其 `include` 的文件、看服务日志；启用了 `native_api`
+  时页面上还会给出 doona 面板的链接。这个入口来自 vendored 的 `luci-app-honk`，
+  上游 feed 里同名的 `honk` 包会和本地包冲突，所以只搬了这两个 LuCI 包。
+- **服务默认关闭**。刷完在「服务 → honk」里改配置、点启动即可；命令行等价于
   `/etc/init.d/honk enable && /etc/init.d/honk start`。
 - 面板：`http://<路由器 LAN IP>:9527/`（内嵌 doona，首次访问创建管理员，
   默认只走 HTTP，防火墙默认不放行 WAN）。

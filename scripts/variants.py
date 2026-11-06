@@ -34,6 +34,8 @@ VARIANTS = {
         'required': [
             'CONFIG_TARGET_mediatek_filogic_DEVICE_tenda_be12-pro=y',
             'CONFIG_PACKAGE_honk=y',
+            'CONFIG_PACKAGE_luci-app-honk=y',
+            'CONFIG_PACKAGE_luci-lib-daeuniverse=y',
             'CONFIG_PACKAGE_vmlinux-btf-local=y',
             'CONFIG_PACKAGE_kmod-veth=y',
             'CONFIG_PACKAGE_kmod-nft-queue=y',
@@ -81,6 +83,7 @@ PASSWALL_STACK = (
 )
 
 HONK_EXTRA_PACKAGES = (
-    'honk', 'vmlinux-btf-local', 'kmod-veth', 'kmod-nft-queue',
+    'honk', 'vmlinux-btf-local', 'luci-lib-daeuniverse', 'luci-app-honk',
+    'kmod-veth', 'kmod-nft-queue',
     'kmod-nfnetlink-queue', 'v2ray-geoip', 'v2ray-geosite',
 )
