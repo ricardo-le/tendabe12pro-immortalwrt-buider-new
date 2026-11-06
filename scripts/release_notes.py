@@ -145,9 +145,12 @@ def main(release_dir, output):
     ]
     versions = sorted({d['variant'].get('kernel_version') for d in found.values()
                        if d['variant'].get('kernel_version')})
-    kernel_note = ('、'.join(versions) if versions else '本次 ImmortalWrt master 构建的内核')
-    lines.append(f'- honk 版要求内核 6.12 以上：本次内核为 {kernel_note}；'
-                 '回退到更老的官方固件后 honk 将无法启动。')
+    if versions:
+        lines.append(f'- honk 版要求内核 6.12 以上：本次内核为 '
+                     f'{"、".join(versions)}；回退到更老的官方固件后 honk 将无法启动。')
+    else:
+        lines.append('- honk 版要求内核 6.12 以上：本次未记录内核版本；'
+                     '回退到更老的官方固件后 honk 将无法启动。')
 
     drift = [note for data in found.values()
              for note in data['source'].get('drift_notes', [])]

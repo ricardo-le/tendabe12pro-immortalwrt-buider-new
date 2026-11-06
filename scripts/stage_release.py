@@ -29,15 +29,23 @@ def groups(release_dir):
     record = release_dir / 'variant.json'
     if record.is_file():
         try:
-            groups.append((release_dir, json.loads(record.read_text())['variant']))
+            variant = json.loads(record.read_text())['variant']
         except (KeyError, json.JSONDecodeError):
-            pass
+            return groups
+        # Never stage the same variant twice when both layouts are present.
+        if variant not in {name for _, name in groups}:
+            groups.append((release_dir, variant))
     return groups
 
 
 def main(release_dir, upload_dir):
     release_dir = pathlib.Path(release_dir)
     upload_dir = pathlib.Path(upload_dir)
+    # Both artifact downloads use continue-on-error, so this directory may not
+    # exist at all when a run produced nothing; fail with a clear message
+    # instead of a traceback from iterdir().
+    if not release_dir.is_dir():
+        sys.exit(f'no firmware artifacts under {release_dir}')
     if upload_dir.exists():
         shutil.rmtree(upload_dir)
     upload_dir.mkdir(parents=True)

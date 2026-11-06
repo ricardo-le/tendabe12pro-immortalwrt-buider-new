@@ -57,10 +57,11 @@ Release 里所有附件都带变体前缀，例如：
 passwall-immortalwrt-mediatek-filogic-tenda_be12-pro-squashfs-sysupgrade.bin
 honk-immortalwrt-mediatek-filogic-tenda_be12-pro-squashfs-sysupgrade.bin
 passwall-…initramfs-kernel.bin / honk-…initramfs-kernel.bin   # 恢复用
-passwall-…manifest / honk-…manifest
+passwall-…manifest / honk-…manifest                          # 实际安装的包清单
+passwall-immortalwrt-commit.txt / honk-immortalwrt-commit.txt
 passwall-source-metadata.json / honk-source-metadata.json
 passwall-variant.json / honk-variant.json
-xray-release.json / honk-release.json
+passwall-xray-release.json / honk-release.json               # 上游二进制来源
 SHA256SUMS
 ```
 

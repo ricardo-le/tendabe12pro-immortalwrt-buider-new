@@ -89,14 +89,18 @@ def collect(root, destination, variant):
     btf_bytes = check_btf(root) if variant == 'honk' else None
 
     images_dir = root / 'bin/targets' / variants.IMAGES_DIR
-    images = sorted(p for p in images_dir.glob(f'*{variants.DEVICE}*') if p.is_file())
+    # The per-device manifest also carries the device name, so exclude it here:
+    # `images` is supposed to be the flashable set and ends up in variant.json.
+    images = sorted(p for p in images_dir.glob(f'*{variants.DEVICE}*')
+                    if p.is_file() and p.suffix != '.manifest')
     sysupgrade = [p for p in images if 'sysupgrade' in p.name and p.suffix == '.bin']
     if not sysupgrade:
         sys.exit('No Tenda BE12 Pro sysupgrade image was produced.')
 
     sizes = [kernel_size(image) for image in sysupgrade]
-    if any(size is None for size in sizes):
-        sys.exit(f'Could not read the kernel size from {sysupgrade[0].name}; '
+    unreadable = [image.name for image, size in zip(sysupgrade, sizes) if size is None]
+    if unreadable:
+        sys.exit(f'Could not read the kernel size from {", ".join(unreadable)}; '
                  'refusing to publish an unchecked image.')
     measured = max(sizes)
     if measured >= KERNEL_LIMIT:
@@ -109,7 +113,7 @@ def collect(root, destination, variant):
     destination.mkdir(parents=True, exist_ok=True)
     for image in images:
         shutil.copy2(image, destination / image.name)
-    manifests = sorted(images_dir.glob('*.manifest'))
+    manifests = sorted(images_dir.glob(f'*{variants.DEVICE}*.manifest'))
     if not manifests:
         sys.exit('No installed-package manifest was produced for the Release.')
     for manifest in manifests:
