@@ -29,11 +29,17 @@ def choose_release(releases):
     published = [item for item in releases if not item['draft'] and item.get('published_at')]
     if not published:
         raise ValueError('No published Xray release was found')
-    release = max(published, key=lambda item: item['published_at'])
-    for asset in release['assets']:
-        if asset['name'] == ASSET:
-            return release, asset
-    raise ValueError('Newest published Xray release lacks ' + ASSET)
+    # A beta or rc that happens to be the newest tag should not silently become
+    # the Xray core of a router firmware; only fall back to pre-releases when
+    # there is no stable release carrying the asset at all.
+    for pool in ([item for item in published if not item['prerelease']], published):
+        for release in sorted(pool, key=lambda item: item['published_at'], reverse=True):
+            for asset in release['assets']:
+                if asset['name'] == ASSET:
+                    if release['prerelease']:
+                        print(f'using pre-release Xray {release["tag_name"]}: no stable release has {ASSET}')
+                    return release, asset
+    raise ValueError('No published Xray release carries ' + ASSET)
 
 
 def package_makefile(version):
@@ -88,7 +94,8 @@ $(eval $(call BuildPackage,xray-core))
 '''
 
 
-def main(root):
+def prepare(root):
+    root = pathlib.Path(root).resolve()
     feed_package = root / 'feeds/packages/net/xray-core'
     if not (feed_package / 'files/xray.init').is_file():
         sys.exit('ImmortalWrt xray-core feed layout changed; stopping build.')
@@ -122,4 +129,4 @@ def main(root):
 
 
 if __name__ == '__main__':
-    main(pathlib.Path(sys.argv[1]).resolve())
+    prepare(sys.argv[1])

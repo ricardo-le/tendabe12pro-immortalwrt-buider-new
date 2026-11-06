@@ -1,7 +1,17 @@
 name: Build Tenda BE12 Pro ImmortalWrt
 
+# Two variants are built from the same ImmortalWrt checkout:
+#   passwall - the original firmware (Passwall + official Xray binary)
+#   honk     - the same base without the whole Passwall stack, plus honk
+# Both land in one GitHub Release, with every asset prefixed by its variant.
+
 on:
   workflow_dispatch:
+    inputs:
+      honk_tag:
+        description: 'honk release tag (empty = the pinned default in scripts/prepare_honk.py)'
+        required: false
+        default: ''
   schedule:
     # Beijing Monday, Wednesday, Friday 02:00 = previous UTC day 18:00.
     - cron: '0 18 * * 0,2,4'
@@ -9,10 +19,19 @@ on:
 permissions:
   contents: write
 
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
   build:
+    name: build (${{ matrix.variant }})
     runs-on: ubuntu-24.04
-    timeout-minutes: 360
+    timeout-minutes: 420
+    strategy:
+      fail-fast: false
+      matrix:
+        variant: [passwall, honk]
     steps:
       - uses: actions/checkout@v4
 
@@ -24,7 +43,18 @@ jobs:
       - name: Install build dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y build-essential bison flex gawk gcc-multilib g++-multilib gettext git libncurses-dev libssl-dev python3 python3-setuptools rsync unzip zlib1g-dev file wget curl subversion swig time
+          sudo apt-get install -y build-essential bison flex gawk gcc-multilib g++-multilib gettext git libncurses-dev libssl-dev python3 python3-setuptools rsync unzip zlib1g-dev file wget curl subversion swig time cmake libdw-dev libelf-dev libbz2-dev
+
+      # Ubuntu 24.04 ships dwarves 1.25, which happens to work, but the BTF
+      # encoder has to handle DW_TAG_unspecified_type from GCC 14 on kernel
+      # 6.18; pin a known-good pahole instead of trusting the distro.
+      - name: Build pahole
+        run: |
+          git clone --depth=1 --branch v1.32 https://github.com/acmel/dwarves.git /tmp/dwarves
+          cmake -S /tmp/dwarves -B /tmp/dwarves/build -DCMAKE_BUILD_TYPE=Release
+          cmake --build /tmp/dwarves/build -j"$(nproc)"
+          sudo cmake --install /tmp/dwarves/build
+          pahole --version
 
       - name: Clone ImmortalWrt master and update feeds
         run: |
@@ -33,16 +63,11 @@ jobs:
           ./scripts/feeds update -a
           ./scripts/feeds install -a
 
-      - name: Configure official latest Xray binary
+      - name: Prepare ${{ matrix.variant }} build
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          cp tendabe12pro.config immortalwrt/.config
-          python3 scripts/prepare_xray.py immortalwrt
-          cd immortalwrt
-          make defconfig
-          python3 ../scripts/check_config.py .config
-          python3 ../scripts/record_sources.py . ../tendabe12pro.config
+          HONK_TAG: ${{ inputs.honk_tag }}
+        run: python3 scripts/prepare.py ${{ matrix.variant }} --root immortalwrt --repo .
 
       - name: Download build sources
         working-directory: immortalwrt
@@ -52,8 +77,34 @@ jobs:
         working-directory: immortalwrt
         run: make -j"$(nproc)" V=s || make -j1 V=s
 
-      - name: Verify Xray and collect firmware
-        run: python3 scripts/collect_outputs.py immortalwrt release
+      - name: Verify payload and collect firmware
+        run: python3 scripts/collect_outputs.py immortalwrt release/${{ matrix.variant }} ${{ matrix.variant }}
+
+      - name: Upload ${{ matrix.variant }} firmware
+        uses: actions/upload-artifact@v4
+        with:
+          name: firmware-${{ matrix.variant }}
+          path: release/${{ matrix.variant }}
+          if-no-files-found: error
+          retention-days: 14
+
+  publish:
+    name: publish release
+    needs: build
+    # A failing variant must not throw away the firmware the other one built.
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download firmware artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: release
+          pattern: firmware-*
+
+      - name: Stage release assets
+        run: python3 scripts/stage_release.py release upload
 
       - name: Write Release notes
         run: python3 scripts/release_notes.py release release-notes.md
@@ -63,7 +114,7 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           tag="build-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
-          gh release create "$tag" release/* \
+          gh release create "$tag" upload/* \
             --repo "$GITHUB_REPOSITORY" \
             --target "$GITHUB_SHA" \
             --title "Tenda BE12 Pro $(date -u +%Y-%m-%d) #${GITHUB_RUN_NUMBER}" \

@@ -1,41 +1,129 @@
 #!/usr/bin/env python3
-"""Check the built root filesystem and collect device-specific firmware."""
+"""Verify the built root filesystem and collect the device firmware.
+
+Usage: collect_outputs.py <immortalwrt-root> <destination> <variant>
+"""
 
 import hashlib
 import json
 import pathlib
 import shutil
 import sys
+import tarfile
 
-root = pathlib.Path(sys.argv[1]).resolve()
-destination = pathlib.Path(sys.argv[2]).resolve()
-metadata = json.loads((root / 'xray-prebuilt/release.json').read_text())
-installed = list(root.glob('staging_dir/target-*/root-mediatek/usr/bin/xray'))
-if len(installed) != 1:
-    sys.exit(f'Expected one installed Xray binary, found {len(installed)}.')
-installed_hash = hashlib.sha256(installed[0].read_bytes()).hexdigest()
-if installed_hash != metadata['binary_sha256']:
-    sys.exit('The firmware root filesystem does not contain the selected Xray binary.')
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 
-images_dir = root / 'bin/targets/mediatek/filogic'
-images = sorted(images_dir.glob('*tenda_be12-pro*'))
-if not any('sysupgrade' in image.name and image.suffix == '.bin' for image in images):
-    sys.exit('No Tenda BE12 Pro sysupgrade image was produced.')
-destination.mkdir(parents=True, exist_ok=True)
-for image in images:
-    if image.is_file():
+import variants
+
+KERNEL_LIMIT = variants.KERNEL_PARTITION_BYTES
+
+
+def kernel_size(image):
+    """Size of the kernel member of the sysupgrade tar, or None."""
+    try:
+        with tarfile.open(image, 'r:') as archive:
+            for member in archive.getmembers():
+                if member.name.rsplit('/', 1)[-1] == 'kernel':
+                    return member.size
+    except tarfile.TarError:
+        return None
+    return None
+
+
+def check_kernel(root, variant):
+    """honk needs kernel options the .config cannot express; verify them."""
+    if variant != 'honk':
+        return {}
+    configs = list(root.glob('build_dir/target-*/linux-*/linux-*/.config'))
+    if len(configs) != 1:
+        sys.exit(f'Expected one kernel .config, found {len(configs)}.')
+    text = configs[0].read_text()
+    if 'CONFIG_CGROUP_BPF=y' not in text:
+        sys.exit('The built kernel has no CONFIG_CGROUP_BPF=y; honk cannot start on it.')
+    if 'CONFIG_DEBUG_INFO=y' not in text:
+        sys.exit('The built kernel has no CONFIG_DEBUG_INFO=y; the BTF blob would be useless.')
+    if 'CONFIG_DEBUG_INFO_REDUCED=y' in text:
+        sys.exit('The built kernel uses DEBUG_INFO_REDUCED; pahole cannot produce full BTF.')
+    return {'kernel_config': str(configs[0].relative_to(root)), 'cgroup_bpf': True}
+
+
+def check_btf(root):
+    blobs = list(root.glob('staging_dir/target-*/root-*/usr/lib/debug/boot/vmlinux'))
+    if len(blobs) != 1:
+        sys.exit(f'Expected one installed BTF blob, found {len(blobs)}.')
+    size = blobs[0].stat().st_size
+    if size < 512 * 1024:
+        sys.exit(f'The installed BTF blob is only {size} bytes; pahole probably failed.')
+    head = blobs[0].read_bytes()[:2]
+    if head != b'\x9f\xeb':
+        sys.exit('The installed BTF blob does not start with the BTF magic.')
+    return size
+
+
+def collect(root, destination, variant):
+    root = pathlib.Path(root).resolve()
+    destination = pathlib.Path(destination).resolve()
+    spec = variants.VARIANTS[variant]
+
+    payload = json.loads((root / spec['release_json']).read_text())
+    installed = list(root.glob(f'staging_dir/target-*/root-*/{spec["binary"]}'))
+    if len(installed) != 1:
+        sys.exit(f'Expected one installed {spec["payload"]} binary, found {len(installed)}.')
+    actual = hashlib.sha256(installed[0].read_bytes()).hexdigest()
+    if actual != payload['binary_sha256']:
+        sys.exit(f'The root filesystem does not contain the selected {spec["payload"]} binary.')
+
+    kernel = check_kernel(root, variant)
+    btf_bytes = check_btf(root) if variant == 'honk' else None
+
+    images_dir = root / 'bin/targets' / variants.IMAGES_DIR
+    images = sorted(p for p in images_dir.glob(f'*{variants.DEVICE}*') if p.is_file())
+    sysupgrade = [p for p in images if 'sysupgrade' in p.name and p.suffix == '.bin']
+    if not sysupgrade:
+        sys.exit('No Tenda BE12 Pro sysupgrade image was produced.')
+
+    measured = kernel_size(sysupgrade[0])
+    if measured is None:
+        print('warning: could not read the kernel size from the sysupgrade image', file=sys.stderr)
+    elif measured >= KERNEL_LIMIT:
+        sys.exit(f'The kernel is {measured / 1048576:.2f} MB but the partition holds '
+                 f'{KERNEL_LIMIT / 1048576:.0f} MB; the image would not boot.')
+    elif measured > KERNEL_LIMIT * 0.95:
+        print(f'warning: the kernel is {measured / 1048576:.2f} MB of '
+              f'{KERNEL_LIMIT / 1048576:.0f} MB', file=sys.stderr)
+
+    destination.mkdir(parents=True, exist_ok=True)
+    for image in images:
         shutil.copy2(image, destination / image.name)
-manifests = sorted(images_dir.glob('*.manifest'))
-if not manifests:
-    sys.exit('No installed-package manifest was produced for the Release.')
-for manifest in manifests:
-    shutil.copy2(manifest, destination / manifest.name)
-shutil.copy2(root / 'xray-prebuilt/release.json', destination / 'xray-release.json')
-shutil.copy2(root / 'source-commit.txt', destination / 'immortalwrt-commit.txt')
-shutil.copy2(root / 'source-metadata.json', destination / 'source-metadata.json')
-checksums = []
-for path in sorted(destination.iterdir()):
-    if path.is_file():
-        checksums.append(f'{hashlib.sha256(path.read_bytes()).hexdigest()}  {path.name}')
-(destination / 'SHA256SUMS').write_text('\n'.join(checksums) + '\n')
-print(f'Collected {len(images)} device files; installed Xray SHA-256 matches {metadata["tag"]}.')
+    manifests = sorted(images_dir.glob('*.manifest'))
+    if not manifests:
+        sys.exit('No installed-package manifest was produced for the Release.')
+    for manifest in manifests:
+        shutil.copy2(manifest, destination / manifest.name)
+
+    shutil.copy2(root / spec['release_json'], destination / f'{spec["payload"]}-release.json')
+    shutil.copy2(root / 'source-commit.txt', destination / 'immortalwrt-commit.txt')
+    shutil.copy2(root / 'source-metadata.json', destination / 'source-metadata.json')
+
+    record = {
+        'variant': variant,
+        'title': spec['title'],
+        **kernel,
+        'payload': spec['payload'],
+        'payload_tag': payload['tag'],
+        'payload_sha256': payload['binary_sha256'],
+        'kernel_bytes': measured,
+        'kernel_partition_bytes': KERNEL_LIMIT,
+        'btf_bytes': btf_bytes,
+        'images': [p.name for p in images],
+    }
+    (destination / 'variant.json').write_text(json.dumps(record, indent=2) + '\n')
+    print(f'{variant}: collected {len(images)} device files, '
+          f'{spec["payload"]} SHA-256 matches {payload["tag"]}, '
+          f'kernel {measured and round(measured / 1048576, 2)} MB')
+
+
+if __name__ == '__main__':
+    if len(sys.argv) != 4:
+        sys.exit('usage: collect_outputs.py <immortalwrt-root> <destination> <variant>')
+    collect(sys.argv[1], sys.argv[2], sys.argv[3])

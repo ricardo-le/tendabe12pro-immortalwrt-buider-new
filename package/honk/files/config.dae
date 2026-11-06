@@ -1,0 +1,71 @@
+# Minimal honk configuration, installed as /etc/honk/config.dae.
+#
+# This is only a working skeleton: add your nodes (or a subscription) and
+# routing rules before enabling the service. It routes everything direct on
+# purpose, so that enabling honk does not cut connectivity before a proxy is
+# configured.
+#
+# lan_interface is the OpenWrt LAN bridge and wan_interface follows the IPv4
+# default route. Adjust them if your layout differs.
+#
+# The embedded doona dashboard listens on http://<router LAN IP>:9527/ .
+# Use the IP address, not a host name. The first visit creates the
+# administrator account. The default firewall keeps 9527 closed on WAN; to
+# reach it only from the router, change listen to '127.0.0.1:9527' and use
+# ssh -L 9527:127.0.0.1:9527 root@<router>.
+
+global {
+    wan_interface: auto
+    lan_interface: br-lan
+    log_level: info
+    dial_mode: domain++
+    auto_config_kernel_parameter: true
+    data_dir: '/etc/honk/data'
+    # Empty: log to stdout, which procd forwards to syslog/logread.
+    log_file: ''
+    tcp_check_url: 'https://www.gstatic.com/generate_204'
+    tcp_check_http_method: HEAD
+    check_interval: 300s
+    bootstrap_resolver: '1.1.1.1:53'
+    # Hold ambiguous LAN UDP first packets through NFQUEUE. Needs the
+    # nfnetlink_queue and nft_queue modules, which the package depends on.
+    nfqueue_enable: true
+}
+
+dns {
+    upstream {
+        # dnsmasq on this router; honk sends its own lookups there.
+        local: 'udp://127.0.0.1:53'
+    }
+    routing {
+        request {
+            fallback: local
+        }
+        response {
+            fallback: local
+        }
+    }
+}
+
+routing {
+    # Everything direct until groups and rules are added above this fallback.
+    fallback: direct
+}
+
+experimental {
+    clash_api {
+        external_controller: '127.0.0.1:9090'
+        default_mode: 'Rule'
+    }
+    native_api {
+        enabled: true
+        listen: '0.0.0.0:9527'
+        password_auth: true
+        config_write: true
+        ui: 'embedded'
+        # ui: 'embedded-lite'   # doona lite
+    }
+    cache_file {
+        enabled: true
+    }
+}

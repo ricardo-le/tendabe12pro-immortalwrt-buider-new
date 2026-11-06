@@ -1,0 +1,85 @@
+#!/bin/sh /etc/rc.common
+#
+# procd init script for honk-core, adapted from honk/files/honk.init of
+# daeuniverse/openwrt-packages (GPL-3.0-or-later).
+#
+# UCI (/etc/config/honk):
+#
+#   config honk 'config'
+#       option config_file '/etc/honk/config.dae'
+#
+# Whether honk starts at boot is decided by the rc.d link, not by a UCI
+# option: /etc/init.d/honk enable or disable. The firmware ships it disabled,
+# because the default configuration routes everything direct and a proxy that
+# is not configured yet should not take over the gateway.
+#
+# honk-core runs as root: its eBPF datapath creates the dae0 link pair and the
+# daens network namespace, attaches TC programs and may open NFQUEUE.
+
+USE_PROCD=1
+START=99
+STOP=01
+
+CONF=honk
+PROG=/usr/bin/honk-core
+
+start_service() {
+	config_load "$CONF"
+
+	local config_file
+	config_get config_file config config_file "/etc/honk/config.dae"
+
+	if [ ! -r "$config_file" ]; then
+		logger -t honk "configuration file '$config_file' is missing or unreadable"
+		return 1
+	fi
+
+	# honk always loads raw BTF for its loader target; vmlinux-btf-local puts
+	# the blob at the second path, a kernel with its own BTF answers the first.
+	if [ ! -e /sys/kernel/btf/vmlinux ] && [ ! -e /usr/lib/debug/boot/vmlinux ]; then
+		logger -t honk "the kernel has no BTF: install the vmlinux-btf-local package"
+		return 1
+	fi
+
+	# eBPF maps must be pinned on bpffs, and OpenWrt does not mount it by
+	# itself. BusyBox has no mountpoint applet, so check /proc/mounts. It is
+	# left mounted on stop because other tools may share it.
+	grep -qs ' /sys/fs/bpf bpf ' /proc/mounts || mount -t bpf bpf /sys/fs/bpf
+
+	# honk requires cgroup v2; mount it if the system has not done so yet.
+	[ -e /sys/fs/cgroup/cgroup.controllers ] || mount -t cgroup2 none /sys/fs/cgroup
+
+	# procd runs each instance in /sys/fs/cgroup/services/<service>/<instance>
+	# but enables no controller there, so honk would find no memory.current and
+	# its telemetry would have no cgroup reading. Enable the memory controller
+	# down to the service cgroup before procd moves the instance in.
+	local cgroup
+	if grep -qsw memory /sys/fs/cgroup/cgroup.controllers 2>/dev/null; then
+		mkdir -p "/sys/fs/cgroup/services/$CONF"
+		for cgroup in /sys/fs/cgroup /sys/fs/cgroup/services "/sys/fs/cgroup/services/$CONF"; do
+			echo +memory > "$cgroup/cgroup.subtree_control" 2>/dev/null || \
+				logger -t honk "cannot enable the memory controller in $cgroup"
+		done
+	fi
+
+	procd_open_instance "$CONF"
+	procd_set_param command "$PROG" --config "$config_file"
+	# honk budgets its flow admission from RLIMIT_NOFILE, so the hard limit
+	# has to stay large enough for a gateway.
+	procd_set_param limits core="unlimited" nofile="1048576 1048576"
+	procd_set_param respawn
+	procd_set_param stdout 1
+	procd_set_param stderr 1
+	procd_close_instance
+}
+
+reload_service() {
+	config_load "$CONF"
+	procd_running "$CONF" "$CONF" || return 0
+	# honk-core reload reads the instance lock and sends SIGHUP
+	"$PROG" reload
+}
+
+service_triggers() {
+	procd_add_reload_trigger "$CONF"
+}

@@ -1,0 +1,8 @@
+#!/bin/sh
+# The image build enables every init script it installs; a freshly flashed
+# honk has no nodes and no routing rules yet, so keep it off until the user
+# turns it on with /etc/init.d/honk enable.
+[ -n "$IPKG_INSTROOT" ] && exit 0
+[ -n "$pkgname" ] && exit 0
+/etc/init.d/honk disable
+exit 0
