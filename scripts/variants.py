@@ -19,6 +19,9 @@ VARIANTS = {
             'CONFIG_PACKAGE_luci-app-passwall=y',
             'CONFIG_PACKAGE_luci-app-passwall_INCLUDE_Xray=y',
             'CONFIG_PACKAGE_xray-core=y',
+            # Dropbear has no built-in SFTP server; without this neither WinSCP
+            # nor `sftp` can open a session.
+            'CONFIG_PACKAGE_openssh-sftp-server=y',
         ],
         # AdGuardHome is not preinstalled, but it is deliberately NOT forbidden:
         # it can be added back from menuconfig at any time.
@@ -42,6 +45,9 @@ VARIANTS = {
             'CONFIG_PACKAGE_kmod-nfnetlink-queue=y',
             'CONFIG_PACKAGE_v2ray-geoip=y',
             'CONFIG_PACKAGE_v2ray-geosite=y',
+            # Same as the passwall variant: dropbear needs openssh-sftp-server
+            # to answer the sftp subsystem request.
+            'CONFIG_PACKAGE_openssh-sftp-server=y',
             'CONFIG_KERNEL_DEBUG_INFO=y',
             '# CONFIG_KERNEL_DEBUG_INFO_REDUCED is not set',
             # Kernel/Configure/Default copies CONFIG_KERNEL_* into the kernel

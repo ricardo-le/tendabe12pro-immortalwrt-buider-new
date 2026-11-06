@@ -12,6 +12,8 @@ Tenda BE12 Pro（mt7987a / mediatek-filogic）的 ImmortalWrt 固件，用 GitHu
 相同的提交，Release 说明按变体分别列出实际 commit），只是包选择和内核选项不同。
 两个变体的配置里都**默认不装 AdGuardHome**（`adguardhome` 与 `luci-app-adguardhome`），
 但流水线**不拦它**——想要就自己在 `menuconfig` 里勾回来，`check_config.py` 不会因此报错。
+两个变体都带 `openssh-sftp-server`：dropbear 自身没有 sftp 子系统，缺了它 WinSCP、FileZilla、
+`sftp` 都连不上（只装这一个子包，不装整套 openssh）。
 
 ## 目录结构
 
