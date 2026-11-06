@@ -1,5 +1,10 @@
 #!/usr/bin/env python3
-"""Replace the feed's source-built Xray package with an official ARM64 release."""
+"""Replace the feed's source-built Xray package with the newest official ARM64 release.
+
+This firmware intentionally tracks the latest Xray *published release*,
+including beta/rc builds. Do not filter out prereleases: that is the requirement,
+not an accident. Only drafts and releases missing the arm64 asset are skipped.
+"""
 
 import hashlib
 import io
@@ -26,19 +31,19 @@ def fetch(url):
 
 
 def choose_release(releases):
+    """Newest published release carrying the ARM64 asset, prereleases included."""
     published = [item for item in releases if not item['draft'] and item.get('published_at')]
     if not published:
         raise ValueError('No published Xray release was found')
-    # A beta or rc that happens to be the newest tag should not silently become
-    # the Xray core of a router firmware; only fall back to pre-releases when
-    # there is no stable release carrying the asset at all.
-    for pool in ([item for item in published if not item['prerelease']], published):
-        for release in sorted(pool, key=lambda item: item['published_at'], reverse=True):
-            for asset in release['assets']:
-                if asset['name'] == ASSET:
-                    if release['prerelease']:
-                        print(f'using pre-release Xray {release["tag_name"]}: no stable release has {ASSET}')
-                    return release, asset
+    # Strict chronological order over ALL published releases. A beta/rc is a
+    # valid (and wanted) answer. Skipping a release that lacks the asset is a
+    # robustness improvement over failing on an incomplete/partial upload.
+    for release in sorted(published, key=lambda item: item['published_at'], reverse=True):
+        for asset in release['assets']:
+            if asset['name'] == ASSET:
+                if release['prerelease']:
+                    print(f'using pre-release Xray {release["tag_name"]} (newest published release)')
+                return release, asset
     raise ValueError('No published Xray release carries ' + ASSET)
 
 

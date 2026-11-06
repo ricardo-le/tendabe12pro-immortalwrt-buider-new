@@ -9,7 +9,7 @@ KERNEL_PARTITION_BYTES = 6 * 1024 * 1024  # partition@780000, size 0x600000
 VARIANTS = {
     'passwall': {
         'title': 'Passwall + Xray',
-        'summary': 'Passwall 全家桶 + 官方最新 Xray 内核（原有变体）',
+        'summary': 'Passwall 全家桶 + 官方最新 Xray（含 beta/rc 预发布）',
         'config': 'tendabe12pro.config',
         'payload': 'xray',
         'release_json': 'xray-prebuilt/release.json',

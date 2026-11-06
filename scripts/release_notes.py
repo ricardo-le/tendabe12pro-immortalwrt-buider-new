@@ -69,6 +69,7 @@ def variant_section(variant, data):
         lines.append(f'- Passwall feed 版本：`{source["passwall_version"]}`')
         lines.append(f'- Xray 官方版本：`{payload["tag"]}`'
                      + ('（预发布版）' if payload.get('prerelease') else ''))
+        lines.append('- Xray 版本策略：按发布时间取最新的已发布版本（含 beta/rc），不是最新正式版。')
         lines.append('- 官方 Xray 二进制已替换 feed 里源码编译的版本，构建时校验了发布页 SHA-256。')
     else:
         lines.append(f'- honk 版本：`{payload["tag"]}`'

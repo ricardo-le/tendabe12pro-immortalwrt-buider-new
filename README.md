@@ -39,6 +39,11 @@ scripts/release_notes.py        # 生成双变体 Release 说明
   里 `DEFAULT_TAG` 钉住的版本。默认钉版本是为了可复现，不会自己漂。
 - 定时：每周一、三、五 02:00（北京时间）。
 
+**Xray 版本策略（刻意需求，别改）**：passwall 版用的是 Xray 官方**按发布时间最新的
+已发布版本，包含 beta/rc 预发布版**，不是"最新正式版"。只跳过 draft 和缺少
+`Xray-linux-arm64-v8a.zip` 资产的发布。是否为预发布会在 Release 说明里标注。
+honk 版相反，钉死在 `DEFAULT_TAG`，不会自动跟进上游。
+
 两个变体并行跑，任何一个失败都不会影响另一个的产物发布；Release 说明里只会列出成功的变体，
 并分别标注各自的源码提交与 feed 提交。
 
@@ -126,8 +131,8 @@ cmake --build dwarves/build -j"$(nproc)" && sudo cmake --install dwarves/build
 任何一项不过，构建直接失败，不会产出可疑镜像：
 
 - `check_config.py`：设备 profile 在、变体包在、**对方变体的包和 AdGuardHome 不在**；
-- Xray：优先选正式版（只有没有正式版带该资产时才退回预发布），校验发布页 SHA-256、
-  ELF 为 aarch64，并核对 rootfs 里的二进制哈希；
+- Xray：按发布时间取最新的已发布版本（**含 beta/rc**，见上文版本策略），跳过 draft
+  与缺少 arm64 资产的发布；校验发布页 SHA-256、ELF 为 aarch64，并核对 rootfs 里的二进制哈希；
 - honk：校验发布页 SHA-256 与 `SHA256SUMS` 双重一致、ELF 为 aarch64，
   核对 rootfs 里的 `honk-core` 哈希；
 - 内核（仅 honk）：`CONFIG_CGROUP_BPF=y`、`CONFIG_DEBUG_INFO=y`、
