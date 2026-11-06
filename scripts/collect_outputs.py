@@ -120,6 +120,10 @@ def collect(root, destination, variant):
         shutil.copy2(manifest, destination / manifest.name)
 
     shutil.copy2(root / spec['release_json'], destination / f'{spec["payload"]}-release.json')
+    # Only the honk variant stages a LuCI page, and only it writes this file.
+    luci = root / 'luci-apps.json'
+    if luci.is_file():
+        shutil.copy2(luci, destination / f'{spec["payload"]}-luci-apps.json')
     shutil.copy2(root / 'source-commit.txt', destination / 'immortalwrt-commit.txt')
     shutil.copy2(root / 'source-metadata.json', destination / 'source-metadata.json')
 

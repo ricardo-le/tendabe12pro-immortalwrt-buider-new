@@ -1,14 +1,15 @@
 #!/usr/bin/env python3
 """Stage the honk variant: official binary and local packages.
 
-Everything here is deterministic and verified:
+Everything here is fetched and verified:
 
 * the honk-core binary comes from the newest upstream release (or from the tag
   passed via HONK_TAG), its SHA-256 is checked against the release's own
   SHA256SUMS asset and against the digest GitHub reports for the asset, and the
   ELF header is checked to be a 64-bit little-endian AArch64 executable;
-* the local packages (honk, vmlinux-btf-local) and the vendored LuCI packages
-  (luci-lib-daeuniverse, luci-app-honk) are copied into the buildroot.
+* the local packages (honk, vmlinux-btf-local) are copied into the buildroot;
+* the LuCI page (luci-app-honk, luci-lib-daeuniverse) is fetched from upstream
+  main, falling back to the vendored copy when GitHub is unreachable.
 
 Kernel options are not touched here: CONFIG_KERNEL_* in the variant config is
 the supported way to change the kernel, because Kernel/Configure/Default copies
@@ -30,6 +31,8 @@ import urllib.error
 import urllib.request
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
+
+import fetch_luci
 
 # Only a fallback for the rare case where the release list cannot be fetched
 # (GitHub API outage or rate limit): the default build follows upstream.
@@ -215,8 +218,13 @@ def prepare(root, repo, tag=None):
     }
     (prebuilt / 'release.json').write_text(json.dumps(metadata, indent=2) + '\n')
 
-    for package in ('honk', 'vmlinux-btf-local', 'luci-lib-daeuniverse', 'luci-app-honk'):
+    for package in ('honk', 'vmlinux-btf-local'):
         shutil.copytree(repo / 'package' / package, root / 'package' / package, dirs_exist_ok=True)
+
+    # The LuCI page follows upstream main, like the binary follows the newest
+    # release; the vendored copy under package/ is only the fallback.
+    fetch_luci.stage(root, repo)
+
     (root / 'package/honk/version.mk').write_text(
         '# Written by scripts/prepare_honk.py; mirrors honk-prebuilt/release.json.\n'
         f'HONK_VERSION:={version}\n'

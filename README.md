@@ -21,11 +21,12 @@ tendabe12pro.config             # passwall 变体配置（基准配置，menucon
 tendabe12pro-honk.config        # honk 变体配置（由脚本派生，勿手改）
 package/honk/                   # honk 本地包：预编译 honk-core + 首启脚本 + 默认配置
 package/vmlinux-btf-local/      # 把本次内核的 BTF 装进 rootfs（不占 6MB 内核分区）
-package/luci-app-honk/          # LuCI 页面：服务 → honk（上游 vendored，见 package/VENDORED.md）
+package/luci-app-honk/          # LuCI 页面：服务 → honk（仓库内是基线副本，构建时取上游最新）
 package/luci-lib-daeuniverse/   # 上面那个页面的共享实现与 daeuniverse-pkg 助手
 scripts/prepare.py              # 变体准备总入口（CI 调它）
 scripts/prepare_xray.py         # 替换 feed 里源码编译的 Xray 为官方二进制
 scripts/prepare_honk.py         # 下载校验 honk 最新发布、铺设本地包
+scripts/fetch_luci.py           # 从上游 openwrt-packages 取最新 LuCI 页面，失败回退基线
 scripts/derive_honk_config.py   # 从基准配置派生 honk 版配置
 scripts/check_config.py         # 校验 defconfig 没丢设备/包，且没混入对方包
 scripts/record_sources.py       # 记录实际使用的源码与 feed 提交
@@ -48,6 +49,12 @@ honk 版同样自动取上游最新已发布版本（上游目前全是 beta，�
 只认 `vX.Y.Z…` 形式的 tag 且必须带 `honk-core-<tag>-aarch64-unknown-linux-musl-full.tar.gz`，
 上游的 `debug` / `debug-diag.*` 调试发布会因此被跳过。想复现旧版本就手填 `honk_tag`。
 
+**LuCI 页面也跟最新**：`luci-app-honk` 与 `luci-lib-daeuniverse` 在构建时从
+`daeuniverse/openwrt-packages` 的 main 最新提交取，页面代码不会停在仓库里那份基线。
+GitHub 不可达（限流、502、改名导致文件缺失）时回退到仓库内的基线副本，构建不会因此中断，
+`honk-luci-apps.json` 会写明这次用的是 `upstream` 还是 `vendored`。想钉住某一版就设
+`LUCI_APPS_REF=<commit|tag|branch>`。
+
 两个变体并行跑，任何一个失败都不会影响另一个的产物发布；Release 说明里只会列出成功的变体，
 并分别标注各自的源码提交与 feed 提交。
 
@@ -64,6 +71,7 @@ passwall-immortalwrt-commit.txt / honk-immortalwrt-commit.txt
 passwall-source-metadata.json / honk-source-metadata.json
 passwall-variant.json / honk-variant.json
 passwall-xray-release.json / honk-release.json               # 上游二进制来源
+honk-luci-apps.json                                          # LuCI 页面取自哪个提交
 SHA256SUMS
 ```
 
@@ -103,8 +111,8 @@ target 的内核配置文件：OpenWrt 的 `Kernel/Configure/Default` 会用 awk
 
 - **LuCI 入口：服务 → honk**。页面里可以启停服务、切换开机自启、直接编辑
   `/etc/honk/config.dae` 及其 `include` 的文件、看服务日志；启用了 `native_api`
-  时页面上还会给出 doona 面板的链接。这个入口来自 vendored 的 `luci-app-honk`，
-  上游 feed 里同名的 `honk` 包会和本地包冲突，所以只搬了这两个 LuCI 包。
+  时页面上还会给出 doona 面板的链接。页面代码在构建时取上游最新，仓库里那份只是
+  拉不到时的基线，详见 `package/VENDORED.md`。
 - **服务默认关闭**。刷完在「服务 → honk」里改配置、点启动即可；命令行等价于
   `/etc/init.d/honk enable && /etc/init.d/honk start`。
 - 面板：`http://<路由器 LAN IP>:9527/`（内嵌 doona，首次访问创建管理员，

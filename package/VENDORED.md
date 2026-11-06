@@ -1,8 +1,22 @@
-# Vendored packages
+# Vendored LuCI packages
 
-`luci-app-honk/` and `luci-lib-daeuniverse/` are copied verbatim from
-[daeuniverse/openwrt-packages](https://github.com/daeuniverse/openwrt-packages)
-at commit `e48b222f239e2572244c8cf495fbce79b0da7528` (main, 2026-11-06).
+`luci-app-honk/` and `luci-lib-daeuniverse/` come from
+[daeuniverse/openwrt-packages](https://github.com/daeuniverse/openwrt-packages).
+They are not a pinned copy that the build uses unconditionally:
+
+- **The build takes the newest commit of upstream `main`**, the same way the
+  honk binary follows the newest release (`scripts/fetch_luci.py`). Page code
+  therefore does not freeze at whatever was copied here.
+- **This directory is the fallback**, used when GitHub cannot be reached, rate
+  limits the request, or upstream is missing one of the files the page needs
+  (a rename would ship a page that cannot work). The build still succeeds and
+  `honk-luci-apps.json` in the Release records `"source": "vendored"` plus the
+  reason.
+- Pin a revision on purpose with `LUCI_APPS_REF=<commit|tag|branch>`.
+
+The baseline below is commit
+`e48b222f239e2572244c8cf495fbce79b0da7528` (main, 2026-11-03), which is also
+`BASELINE_COMMIT` in `scripts/fetch_luci.py`. Keep the two in sync.
 
 They are the LuCI entry point for the `honk` package in this repository:
 `luci-app-honk` adds *Services → honk* (start/stop, Start at boot, an editor for
@@ -10,30 +24,30 @@ They are the LuCI entry point for the `honk` package in this repository:
 `luci-lib-daeuniverse` is the shared page it is built on, including the
 `/usr/libexec/daeuniverse-pkg` helper that reads package state through apk.
 
-Why not add the upstream feed instead: the feed also ships its own `honk`
-package, and buildroot keys every package by `PKG_NAME`, which is global. What
-happens then depends on the installer, not on us: `scripts/feeds` scans the
-core tree first and skips a feed package whose name already exists
-(`WARNING: Not overriding core package 'honk'; use -f to force`), so nothing
-breaks today -- unless someone passes `-f` or the feed is declared `--force`,
-in which case the feed version is linked in and wins. That version is a
-different package altogether: Rust sources compiled with a pinned nightly
-toolchain plus its own init script, UCI defaults, `config.dae` and the
-`vmlinux-btf*` packages. Only these two LuCI packages are taken, so the honk
-binary, init script and UCI file stay under our control and no third-party feed
-enters the build at all.
+Why the whole feed is not added instead: buildroot keys every package by
+`PKG_NAME`, which is global, and the feed also ships its own `honk`. The
+installer would normally skip it (`WARNING: Not overriding core package
+'honk'`), but that guard is not a guarantee: with `-f`, or a feed declared
+`--force`, the feed's version is linked in and wins, and it is a different
+package -- Rust sources compiled with a pinned nightly toolchain plus its own
+init script, UCI defaults, `config.dae` and `vmlinux-btf*` packages. Copying
+only these two packages keeps the honk binary, init script and UCI file under
+our control and keeps a third-party feed out of the build.
 
 Both packages are GPL-3.0-or-later, like the local honk package.
 
-## Updating
+## Refreshing the fallback
+
+The files are copied verbatim, so a diff against upstream should stay empty.
+To refresh the baseline, list the files and download them at the commit you
+want to record:
 
 ```sh
-# list the files the two packages consist of
 curl -s "https://api.github.com/repos/daeuniverse/openwrt-packages/git/trees/main?recursive=1" |
   python3 -c 'import json,sys; [print(x["path"]) for x in json.load(sys.stdin)["tree"]
               if x["type"]=="blob" and x["path"].startswith(("luci-app-honk/","luci-lib-daeuniverse/"))]'
 ```
 
-Re-download those paths into `package/`, keep `daeuniverse-pkg` executable, and
-update the commit above. No local edits are made to the vendored files, so a
-diff against upstream should stay empty.
+Then update the commit above and `BASELINE_COMMIT` in `scripts/fetch_luci.py`.
+This is optional: normal builds already follow upstream main without touching
+this directory.
