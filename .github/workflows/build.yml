@@ -9,7 +9,7 @@ on:
   workflow_dispatch:
     inputs:
       honk_tag:
-        description: 'honk release tag (empty = the pinned default in scripts/prepare_honk.py)'
+        description: 'honk release tag (empty = newest upstream release)'
         required: false
         default: ''
   schedule:

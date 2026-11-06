@@ -10,8 +10,8 @@ Tenda BE12 Pro（mt7987a / mediatek-filogic）的 ImmortalWrt 固件，用 GitHu
 
 两个变体在**各自的 runner** 上拉取同一时间点的 ImmortalWrt master 与 feeds（不保证完全
 相同的提交，Release 说明按变体分别列出实际 commit），只是包选择和内核选项不同。
-两个变体都**不含 AdGuardHome**（`adguardhome` 与 `luci-app-adguardhome`），
-`check_config.py` 会把它列为禁止项，避免以后从菜单里误选回来。
+两个变体的配置里都**默认不装 AdGuardHome**（`adguardhome` 与 `luci-app-adguardhome`），
+但流水线**不拦它**——想要就自己在 `menuconfig` 里勾回来，`check_config.py` 不会因此报错。
 
 ## 目录结构
 
@@ -23,7 +23,7 @@ package/honk/                   # honk 本地包：预编译 honk-core + 首启�
 package/vmlinux-btf-local/      # 把本次内核的 BTF 装进 rootfs（不占 6MB 内核分区）
 scripts/prepare.py              # 变体准备总入口（CI 调它）
 scripts/prepare_xray.py         # 替换 feed 里源码编译的 Xray 为官方二进制
-scripts/prepare_honk.py         # 下载校验 honk、铺设包、注入内核选项
+scripts/prepare_honk.py         # 下载校验 honk 最新发布、铺设本地包
 scripts/derive_honk_config.py   # 从基准配置派生 honk 版配置
 scripts/check_config.py         # 校验 defconfig 没丢设备/包，且没混入对方包
 scripts/record_sources.py       # 记录实际使用的源码与 feed 提交
@@ -35,14 +35,16 @@ scripts/release_notes.py        # 生成双变体 Release 说明
 ## 触发构建
 
 - 手动：Actions → **Build Tenda BE12 Pro ImmortalWrt** → Run workflow。
-  可选填 `honk_tag`（例如 `v0.1.0-beta.6`），留空则用 `scripts/prepare_honk.py`
-  里 `DEFAULT_TAG` 钉住的版本。默认钉版本是为了可复现，不会自己漂。
+  可选填 `honk_tag`（例如 `v0.1.0-beta.6`）固定版本；留空则自动取上游
+  **按发布时间最新的已发布版本**。
 - 定时：每周一、三、五 02:00（北京时间）。
 
 **Xray 版本策略（刻意需求，别改）**：passwall 版用的是 Xray 官方**按发布时间最新的
 已发布版本，包含 beta/rc 预发布版**，不是"最新正式版"。只跳过 draft 和缺少
 `Xray-linux-arm64-v8a.zip` 资产的发布。是否为预发布会在 Release 说明里标注。
-honk 版相反，钉死在 `DEFAULT_TAG`，不会自动跟进上游。
+honk 版同样自动取上游最新已发布版本（上游目前全是 beta，故不存在"只取正式版"的选项）；
+只认 `vX.Y.Z…` 形式的 tag 且必须带 `honk-core-<tag>-aarch64-unknown-linux-musl-full.tar.gz`，
+上游的 `debug` / `debug-diag.*` 调试发布会因此被跳过。想复现旧版本就手填 `honk_tag`。
 
 两个变体并行跑，任何一个失败都不会影响另一个的产物发布；Release 说明里只会列出成功的变体，
 并分别标注各自的源码提交与 feed 提交。
@@ -103,7 +105,7 @@ target 的内核配置文件：OpenWrt 的 `Kernel/Configure/Default` 会用 awk
 - 配置文件 `/etc/honk/config.dae`，UCI 只有 `honk.config.config_file` 一项。
 - 运行时要求：内核 6.12+（实际版本由 ImmortalWrt master 决定，见 Release 说明里
   的 `kernel_version`）、cgroup v2、bpffs、内核 BTF。首启脚本会自动挂 bpffs 与 cgroup2。
-- honk 当前是 alpha（`v0.1.0-beta.5`），上游明确不建议生产使用；
+- honk 目前只有 `v0.1.0-beta.x`，上游全部标为预发布、明确不建议生产使用；
   首次部署请保留带外管理通道（串口/SSH 兜底）。
 - 二进制是官方静态 musl aarch64 `full` 构建（Clash API + 原生 API + 内嵌 doona），
   约 29.5 MB，全部落在 rootfs（约 90 MB 的 ubi 分区）。
@@ -130,7 +132,7 @@ cmake --build dwarves/build -j"$(nproc)" && sudo cmake --install dwarves/build
 
 任何一项不过，构建直接失败，不会产出可疑镜像：
 
-- `check_config.py`：设备 profile 在、变体包在、**对方变体的包和 AdGuardHome 不在**；
+- `check_config.py`：设备 profile 在、变体包在、**对方变体的包不在**（AdGuardHome 不拦）；
 - Xray：按发布时间取最新的已发布版本（**含 beta/rc**，见上文版本策略），跳过 draft
   与缺少 arm64 资产的发布；校验发布页 SHA-256、ELF 为 aarch64，并核对 rootfs 里的二进制哈希；
 - honk：校验发布页 SHA-256 与 `SHA256SUMS` 双重一致、ELF 为 aarch64，
@@ -146,6 +148,7 @@ cmake --build dwarves/build -j"$(nproc)" && sudo cmake --install dwarves/build
 
 - 每次运行 2 个变体 × 约 1.5–2 小时；定时每周 3 次，等于每周 6 次构建。想省额度就删掉
   `schedule`，只留手动触发。
-- honk 上游更新不会自动跟进，改 `DEFAULT_TAG` 或手动填 `honk_tag`。
+- honk 会自动跟进上游最新发布；若 GitHub API 在 CI 里不可用（限流/故障），
+  退回 `DEFAULT_TAG` 并打 warning。要固定版本就填 `honk_tag`。
 - honk 版不含任何 Passwall 组件，Passwall 的节点订阅/分流规则不能直接迁移，
   需要按 dae 语法重写 `config.dae`。

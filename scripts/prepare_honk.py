@@ -3,10 +3,10 @@
 
 Everything here is deterministic and verified:
 
-* the honk-core binary comes from the pinned upstream release, its SHA-256 is
-  checked against the release's own SHA256SUMS asset and against the digest
-  GitHub reports for the asset, and the ELF header is checked to be a 64-bit
-  little-endian AArch64 executable;
+* the honk-core binary comes from the newest upstream release (or from the tag
+  passed via HONK_TAG), its SHA-256 is checked against the release's own
+  SHA256SUMS asset and against the digest GitHub reports for the asset, and the
+  ELF header is checked to be a 64-bit little-endian AArch64 executable;
 * the local packages (honk, vmlinux-btf-local) are copied into the buildroot.
 
 Kernel options are not touched here: CONFIG_KERNEL_* in the variant config is
@@ -25,13 +25,21 @@ import struct
 import subprocess
 import sys
 import tarfile
+import urllib.error
 import urllib.request
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 
+# Only a fallback for the rare case where the release list cannot be fetched
+# (GitHub API outage or rate limit): the default build follows upstream.
 DEFAULT_TAG = 'v0.1.0-beta.5'
 REPO = 'daeuniverse/honk'
 ASSET_TEMPLATE = 'honk-core-{tag}-aarch64-unknown-linux-musl-full.tar.gz'
+# honk also publishes debug builds as tags (debug, debug-diag.issue-415.3) whose
+# assets are named honk-core-debug-*; a version-shaped tag plus the exact asset
+# name filters those out without keeping a blocklist.
+TAG_PATTERN = re.compile(r'^v\d+\.\d+\.\d+')
+RELEASE_LIST = f'https://api.github.com/repos/{REPO}/releases?per_page=30'
 
 
 def fetch(url):
@@ -46,8 +54,53 @@ def fetch(url):
 
 def package_version(tag):
     """v0.1.0-beta.5 -> 0.1.0_beta5 (a version apk/opkg accepts)."""
-    version = tag.removeprefix('v')
-    return re.sub(r'-(alpha|beta|rc)\.', r'_\1', version)
+    version = re.sub(r'[-.](alpha|beta|rc)\.', r'_\1', tag.removeprefix('v'))
+    if not re.fullmatch(r'[0-9][0-9A-Za-z_]*(?:\.[0-9A-Za-z_]+)*', version):
+        sys.exit(f'cannot turn honk tag {tag!r} into a package version ({version!r})')
+    return version
+
+
+def asset_name(tag):
+    return ASSET_TEMPLATE.format(tag=tag)
+
+
+def latest_tag():
+    """Newest upstream release that actually ships the asset we need.
+
+    Every honk release so far is flagged prerelease, so the flag cannot be used
+    to sort releases into stable and unstable; recency plus the presence of the
+    aarch64 musl full tarball is what matters.
+    """
+    try:
+        releases = json.loads(fetch(RELEASE_LIST))
+    except (urllib.error.URLError, TimeoutError, json.JSONDecodeError) as exc:
+        print(f'warning: cannot list honk releases ({exc}); falling back to {DEFAULT_TAG}',
+              file=sys.stderr)
+        return DEFAULT_TAG
+    if not isinstance(releases, list):
+        print(f'warning: unexpected honk release list ({str(releases)[:120]}); '
+              f'falling back to {DEFAULT_TAG}', file=sys.stderr)
+        return DEFAULT_TAG
+
+    usable = []
+    for item in releases:
+        tag = item.get('tag_name') or ''
+        if item.get('draft') or not TAG_PATTERN.match(tag):
+            continue
+        if asset_name(tag) not in {a['name'] for a in item.get('assets') or []}:
+            continue
+        usable.append((item.get('published_at') or '', tag))
+
+    if not usable:
+        print(f'warning: no honk release ships {ASSET_TEMPLATE.format(tag="<tag>")}; '
+              f'falling back to {DEFAULT_TAG}', file=sys.stderr)
+        return DEFAULT_TAG
+
+    usable.sort(reverse=True)
+    newest = usable[0][1]
+    if newest != DEFAULT_TAG:
+        print(f'honk: newest upstream release is {newest} (fallback pin is {DEFAULT_TAG})')
+    return newest
 
 
 def release(tag):
@@ -116,8 +169,9 @@ def prepare(root, repo, tag=None):
     root = pathlib.Path(root).resolve()
     repo = pathlib.Path(repo).resolve()
     check_pahole()
-    tag = tag or os.environ.get('HONK_TAG') or DEFAULT_TAG
-    name = ASSET_TEMPLATE.format(tag=tag)
+    tag = tag or os.environ.get('HONK_TAG') or latest_tag()
+    name = asset_name(tag)
+    print(f'honk: using release {tag} ({name})')
 
     release_payload = release(tag)
     asset = asset_by_name(release_payload, name)

@@ -20,10 +20,9 @@ VARIANTS = {
             'CONFIG_PACKAGE_luci-app-passwall_INCLUDE_Xray=y',
             'CONFIG_PACKAGE_xray-core=y',
         ],
-        'forbidden': [
-            'CONFIG_PACKAGE_adguardhome=y',
-            'CONFIG_PACKAGE_luci-app-adguardhome=y',
-        ],
+        # AdGuardHome is not preinstalled, but it is deliberately NOT forbidden:
+        # it can be added back from menuconfig at any time.
+        'forbidden': [],
     },
     'honk': {
         'title': 'honk（无 Passwall）',
@@ -61,8 +60,6 @@ VARIANTS = {
             'CONFIG_PACKAGE_chinadns-ng=y',
             'CONFIG_PACKAGE_dns2socks=y',
             'CONFIG_PACKAGE_microsocks=y',
-            'CONFIG_PACKAGE_adguardhome=y',
-            'CONFIG_PACKAGE_luci-app-adguardhome=y',
         ],
         # Options a feed adds after the base config was generated cannot be
         # disabled by editing the config, so anything under these prefixes is
