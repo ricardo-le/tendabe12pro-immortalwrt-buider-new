@@ -13,8 +13,9 @@ on:
         required: false
         default: ''
   schedule:
-    # Beijing Monday, Wednesday, Friday 02:00 = previous UTC day 18:00.
-    - cron: '0 18 * * 0,2,4'
+    # Beijing Friday 00:00 = Thursday 16:00 UTC. GitHub cron is UTC-only and
+    # may start a few minutes late during peak hours.
+    - cron: '0 16 * * 4'
 
 permissions:
   contents: write

@@ -42,7 +42,8 @@ scripts/release_notes.py        # 生成双变体 Release 说明
 - 手动：Actions → **Build Tenda BE12 Pro ImmortalWrt** → Run workflow。
   可选填 `honk_tag`（例如 `v0.1.0-beta.6`）固定版本；留空则自动取上游
   **按发布时间最新的已发布版本**。
-- 定时：每周一、三、五 02:00（北京时间）。
+- 定时：每周五 00:00（北京时间，即周四 16:00 UTC）。GitHub 的 cron 只认 UTC，且高峰时段
+  可能延迟几分钟到几十分钟才启动。
 
 **Xray 版本策略（刻意需求，别改）**：passwall 版用的是 Xray 官方**按发布时间最新的
 已发布版本，包含 beta/rc 预发布版**，不是"最新正式版"。只跳过 draft 和缺少
@@ -181,7 +182,7 @@ RPATH；`/usr/local/lib` 虽然在 `/etc/ld.so.conf.d/libc.conf` 里，但新装
 
 ## 已知限制
 
-- 每次运行 2 个变体 × 约 1.5–2 小时；定时每周 3 次，等于每周 6 次构建。想省额度就删掉
+- 每次运行 2 个变体 × 约 1.5–2 小时；定时每周 1 次，等于每周 2 次构建。想省额度就删掉
   `schedule`，只留手动触发。
 - honk 会自动跟进上游最新发布；若 GitHub API 在 CI 里不可用（限流/故障），
   退回 `DEFAULT_TAG` 并打 warning。要固定版本就填 `honk_tag`。
