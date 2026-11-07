@@ -182,8 +182,10 @@ RPATH；`/usr/local/lib` 虽然在 `/etc/ld.so.conf.d/libc.conf` 里，但新装
 
 ## 已知限制
 
-- 每次运行 2 个变体 × 约 1.5–2 小时；定时每周 1 次，等于每周 2 次构建。想省额度就删掉
-  `schedule`，只留手动触发。
+- 一次定时触发（1 个 workflow run）里，`build` job 用 `matrix.variant: [passwall, honk]`
+  展开成 **2 个独立的 runner 并行编译**，各约 1.5–2 小时，同一份 Release 汇总发布。
+  所以定时每周 1 次 = 每周 2 个编译 job（约 3–4 机器小时）。想省额度就删掉 `schedule`，
+  只留手动触发。
 - honk 会自动跟进上游最新发布；若 GitHub API 在 CI 里不可用（限流/故障），
   退回 `DEFAULT_TAG` 并打 warning。要固定版本就填 `honk_tag`。
 - honk 版不含任何 Passwall 组件，Passwall 的节点订阅/分流规则不能直接迁移，
