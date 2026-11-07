@@ -123,7 +123,9 @@ def _stage_vendored(root, repo, ref, reason):
                    and not (repo / 'package' / p).is_file()]
         if missing:
             sys.exit('vendored baseline is incomplete: ' + ', '.join(missing))
-        shutil.copytree(source, root / 'package' / package, dirs_exist_ok=True)
+        destination = root / 'package' / package
+        shutil.rmtree(destination, ignore_errors=True)
+        shutil.copytree(source, destination)
         for path in EXECUTABLE:
             if path.startswith(package + '/'):
                 (root / 'package' / path).chmod(0o755)
@@ -134,7 +136,9 @@ def _stage_vendored(root, repo, ref, reason):
         'commit_date': '',
         'source': 'vendored',
         'reason': str(reason),
-        'files': sorted(REQUIRED),
+        'files': sorted(str(p.relative_to(root / 'package'))
+                        for package in PACKAGES
+                        for p in (root / 'package' / package).rglob('*') if p.is_file()),
     }
 
 
@@ -142,12 +146,17 @@ def stage(root, repo, ref=None):
     """Stage both LuCI packages under root/package and record where they came from."""
     root = pathlib.Path(root).resolve()
     repo = pathlib.Path(repo).resolve()
-    ref = ref or os.environ.get('LUCI_APPS_REF') or DEFAULT_REF
+    if root == repo:
+        raise ValueError('the ImmortalWrt buildroot must differ from the builder repository')
+    pinned_ref = ref or os.environ.get('LUCI_APPS_REF')
+    ref = pinned_ref or DEFAULT_REF
 
     try:
         metadata = _stage_upstream(root, ref)
         print(f'luci: using {PROJECT}@{ref} ({metadata["commit"][:12]})')
     except Exception as exc:  # noqa: BLE001 - any failure falls back on purpose
+        if pinned_ref:
+            sys.exit(f'cannot fetch explicitly pinned LuCI ref {ref!r}: {exc}')
         print(f'warning: cannot fetch {PROJECT}@{ref} ({exc}); '
               'using the vendored copy in package/', file=sys.stderr)
         metadata = _stage_vendored(root, repo, ref, exc)

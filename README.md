@@ -8,7 +8,7 @@ Tenda BE12 Pro（mt7987a / mediatek-filogic）的 ImmortalWrt 固件，用 GitHu
 | `passwall` | Passwall + 官方最新 Xray 内核 | 原有固件，行为不变 | `passwall-` |
 | `honk` | [daeuniverse/honk](https://github.com/daeuniverse/honk) | **完全不含 Passwall 全家桶**（也不含 Xray），LuCI 里多一个「服务 → honk」入口，带内嵌 doona 面板 | `honk-` |
 
-两个变体在**各自的 runner** 上拉取同一时间点的 ImmortalWrt master 与 feeds（不保证完全
+两个变体在**各自的 runner** 上分别拉取 ImmortalWrt master 与 feeds（不保证完全
 相同的提交，Release 说明按变体分别列出实际 commit），只是包选择和内核选项不同。
 两个变体的配置里都**默认不装 AdGuardHome**（`adguardhome` 与 `luci-app-adguardhome`），
 但流水线**不拦它**——想要就自己在 `menuconfig` 里勾回来，`check_config.py` 不会因此报错。
@@ -55,7 +55,7 @@ honk 版同样自动取上游最新已发布版本（上游目前全是 beta，�
 `daeuniverse/openwrt-packages` 的 main 最新提交取，页面代码不会停在仓库里那份基线。
 GitHub 不可达（限流、502、改名导致文件缺失）时回退到仓库内的基线副本，构建不会因此中断，
 `honk-luci-apps.json` 会写明这次用的是 `upstream` 还是 `vendored`。想钉住某一版就设
-`LUCI_APPS_REF=<commit|tag|branch>`。
+`LUCI_APPS_REF=<commit|tag|branch>`；显式指定后拉取失败会中止，避免悄悄改用另一个版本。
 
 两个变体并行跑，任何一个失败都不会影响另一个的产物发布；Release 说明里只会列出成功的变体，
 并分别标注各自的源码提交与 feed 提交。
@@ -100,9 +100,15 @@ cd .. && python3 scripts/derive_honk_config.py
 1. 删掉整个 Passwall 栈：`luci-app-passwall*`、中文语言包，以及 `haproxy`、
    `shadowsocks-rust-*`、`simple-obfs-client`、`v2ray-plugin`、`geoview`、`chinadns-ng`、
    `dns2socks`、`microsocks`、`xray-core`；
-2. 关掉 `CONFIG_KERNEL_DEBUG_INFO_REDUCED`（pahole 需要完整 DWARF 才能生成 BTF）；
+2. 确保 cgroups、cgroup BPF 和内核调试信息开启，关闭
+   `CONFIG_KERNEL_DEBUG_INFO_REDUCED` 与 `CONFIG_KERNEL_DEBUG_INFO_BTF`
+   （保留完整 DWARF，BTF 单独存进 rootfs）；
 3. 加上 `honk`、`vmlinux-btf-local`、`luci-lib-daeuniverse`、`luci-app-honk`、
-   `kmod-veth`、`kmod-nft-queue`、`kmod-nfnetlink-queue`、`v2ray-geoip`、`v2ray-geosite`。
+   `kmod-veth`、`kmod-sched-core`、`kmod-sched-bpf`、`kmod-nft-queue`、
+   `kmod-nfnetlink-queue`、`v2ray-geoip`、`v2ray-geosite`。
+
+已有的关闭项或 `=m` 会原位改成需要的值，避免同一个选项同时出现“关闭”和“开启”。
+CI 会在编译前检查派生配置是否和基准配置同步。
 
 honk 需要的 `CONFIG_CGROUP_BPF` 通过 `CONFIG_KERNEL_CGROUP_BPF=y` 打开，不需要改
 target 的内核配置文件：OpenWrt 的 `Kernel/Configure/Default` 会用 awk 把 `.config`
@@ -110,6 +116,10 @@ target 的内核配置文件：OpenWrt 的 `Kernel/Configure/Default` 会用 awk
 `.config` 里核对一次，确保它真的是 `=y`。
 
 ## honk 版说明
+
+OpenWrt 集成以 **`daeuniverse/openwrt-packages`** 为基线，核心使用
+**`daeuniverse/honk` 的已发布版本**；BTF 从本次编译的内核生成。
+具体版本、选择依据和本地适配见 [honk 基线决策](docs/honk-baseline.md)。
 
 - **LuCI 入口：服务 → honk**。页面里可以启停服务、切换开机自启、直接编辑
   `/etc/honk/config.dae` 及其 `include` 的文件、看服务日志；启用了 `native_api`
@@ -155,15 +165,18 @@ RPATH；`/usr/local/lib` 虽然在 `/etc/ld.so.conf.d/libc.conf` 里，但新装
 任何一项不过，构建直接失败，不会产出可疑镜像：
 
 - `check_config.py`：设备 profile 在、变体包在、**对方变体的包不在**（AdGuardHome 不拦）；
+- 编译后的设备 `.manifest` 再核对必需包和禁止包，避免只检查输入配置；
 - Xray：按发布时间取最新的已发布版本（**含 beta/rc**，见上文版本策略），跳过 draft
   与缺少 arm64 资产的发布；校验发布页 SHA-256、ELF 为 aarch64，并核对 rootfs 里的二进制哈希；
 - honk：校验发布页 SHA-256 与 `SHA256SUMS` 双重一致、ELF 为 aarch64，
   核对 rootfs 里的 `honk-core` 哈希；
-- 内核（仅 honk）：`CONFIG_CGROUP_BPF=y`、`CONFIG_DEBUG_INFO=y`、
-  `DEBUG_INFO_REDUCED` 已关；
+- 内核（仅 honk）：版本 ≥ 6.12，BPF、TCX、网络命名空间、NFQUEUE 能力满足上游要求，
+  `CONFIG_DEBUG_INFO=y`、`DEBUG_INFO_REDUCED` 已关；
 - BTF：magic 为 `9feb` 且不小于 512 KB；
 - 内核体积：逐一读取每个 sysupgrade 镜像里 `kernel` 成员，超过 6 MB 分区直接失败，
-  超过 95% 告警；**读不出内核尺寸也直接失败**，不会静默跳过；
+  超过 95% 告警；**读不出内核尺寸也直接失败**，缺失、重复、空的 kernel/root 成员也拒绝发布；
+- 发布前检查变体身份、镜像、包清单和来源元数据是否完整；下载不完整的变体跳过，
+  完整的另一个变体仍可发布，Release 说明使用相同的筛选结果；
 - feeds 漂移只告警不中断（原实现会因为 feed 恰好更新而随机失败）。
 
 ## 已知限制
@@ -174,3 +187,15 @@ RPATH；`/usr/local/lib` 虽然在 `/etc/ld.so.conf.d/libc.conf` 里，但新装
   退回 `DEFAULT_TAG` 并打 warning。要固定版本就填 `honk_tag`。
 - honk 版不含任何 Passwall 组件，Passwall 的节点订阅/分流规则不能直接迁移，
   需要按 dae 语法重写 `config.dae`。
+
+## 本地验证
+
+```sh
+python3 -m unittest discover -s tests -v
+python3 scripts/check_config.py tendabe12pro.config passwall
+python3 scripts/check_config.py tendabe12pro-honk.config honk
+```
+
+测试不联网，不需要路由器，也不编译固件；覆盖配置派生、包隔离、异常镜像、部分产物发布、
+LuCI 回退及 honk 启动和重载逻辑。完整 Linux 编译仍由 GitHub Actions 执行，
+eBPF 挂钩、真实转发和硬件启动需要在 Tenda BE12 Pro 上验证。

@@ -13,27 +13,15 @@ import json
 import pathlib
 import sys
 
+from stage_release import groups
+
 ORDER = ('passwall', 'honk')
 TITLES = {'passwall': 'Passwall + Xray', 'honk': 'honk（无 Passwall）'}
 
 
 def load(release_dir):
-    flat_variant = None
-    flat_record = release_dir / 'variant.json'
-    if flat_record.is_file():
-        try:
-            flat_variant = json.loads(flat_record.read_text()).get('variant')
-        except json.JSONDecodeError:
-            pass
-
     found = {}
-    for variant in ORDER:
-        candidates = [release_dir / f'firmware-{variant}', release_dir / variant]
-        if flat_variant == variant:
-            candidates.insert(0, release_dir)
-        directory = next((p for p in candidates if (p / 'variant.json').is_file()), None)
-        if directory is None:
-            continue
+    for directory, variant in groups(release_dir):
         record = json.loads((directory / 'variant.json').read_text())
         payload = json.loads((directory / f'{record["payload"]}-release.json').read_text())
         found[variant] = {
@@ -82,8 +70,9 @@ def variant_section(variant, data):
         if btf:
             lines.append(f'- BTF：`/usr/lib/debug/boot/vmlinux`（{btf / 1048576:.1f} MB），'
                          '由本次内核的 vmlinux 现场生成，未塞进仅 6 MB 的内核分区。')
-        lines.append('- 服务**默认关闭**：先 `/etc/init.d/honk enable && start`，'
-                     '或直接编辑 `/etc/honk/config.dae` 后重启。')
+        lines.append('- 服务**默认关闭**：先编辑 `/etc/honk/config.dae`，再执行 '
+                     '`/etc/init.d/honk enable && /etc/init.d/honk start`，'
+                     '或在 LuCI「服务 → honk」中启动。')
         lines.append('- 面板：`http://<路由器 LAN IP>:9527/`（内嵌 doona，首次访问创建管理员）。')
         lines.append('- 不含 Passwall/Xray/haproxy/shadowsocks-rust 等上一版代理栈。')
     kernel = record.get('kernel_bytes')
@@ -114,7 +103,7 @@ def main(release_dir, output):
                    '刷机时任选其一。')
     else:
         only = next(iter(found))
-        summary = (f'- 本次发布只包含 **{only}** 一个变体（另一变体本次构建失败），'
+        summary = (f'- 本次发布只包含 **{only}** 一个变体（另一变体构建或产物下载未成功），'
                    f'附件文件名以 `{only}-` 开头。')
 
     lines = [

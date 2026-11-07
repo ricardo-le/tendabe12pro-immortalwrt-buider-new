@@ -13,6 +13,8 @@ They are not a pinned copy that the build uses unconditionally:
   `honk-luci-apps.json` in the Release records `"source": "vendored"` plus the
   reason.
 - Pin a revision on purpose with `LUCI_APPS_REF=<commit|tag|branch>`.
+  An explicit pin fails the build if it cannot be fetched; only the default
+  follows-main mode may fall back to this baseline.
 
 The baseline below is commit
 `e48b222f239e2572244c8cf495fbce79b0da7528` (main, 2026-11-03), which is also
@@ -35,6 +37,11 @@ only these two packages keeps the honk binary, init script and UCI file under
 our control and keeps a third-party feed out of the build.
 
 Both packages are GPL-3.0-or-later, like the local honk package.
+
+The local `honk/` service integration is also adapted from this upstream
+baseline, while its binary comes from `daeuniverse/honk` releases and its BTF
+from this build's kernel. See [the baseline decision](../docs/honk-baseline.md)
+for the reasons and the reviewed local differences.
 
 ## Refreshing the fallback
 

@@ -1,6 +1,6 @@
 name: Build Tenda BE12 Pro ImmortalWrt
 
-# Two variants are built from the same ImmortalWrt checkout:
+# Each variant uses its own ImmortalWrt master checkout:
 #   passwall - the original firmware (Passwall + official Xray binary)
 #   honk     - the same base without the whole Passwall stack, plus honk
 # Both land in one GitHub Release, with every asset prefixed by its variant.
@@ -34,6 +34,12 @@ jobs:
         variant: [passwall, honk]
     steps:
       - uses: actions/checkout@v4
+
+      - name: Check builder scripts and variant configs
+        run: |
+          python3 -m unittest discover -s tests -v
+          python3 scripts/check_config.py tendabe12pro.config passwall
+          python3 scripts/check_config.py tendabe12pro-honk.config honk
 
       - name: Free runner disk space
         run: |

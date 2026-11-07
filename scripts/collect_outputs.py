@@ -27,12 +27,38 @@ def kernel_size(image):
     """
     try:
         with tarfile.open(image, 'r:*') as archive:
-            for member in archive.getmembers():
-                if member.name.rsplit('/', 1)[-1] == 'kernel':
-                    return member.size
+            payloads = {}
+            for name in ('kernel', 'root'):
+                members = [m for m in archive.getmembers()
+                           if m.name.rsplit('/', 1)[-1] == name]
+                if len(members) != 1 or not members[0].isfile() or members[0].size <= 0:
+                    return None
+                payloads[name] = members[0]
+            if pathlib.PurePosixPath(payloads['kernel'].name).parent != pathlib.PurePosixPath(payloads['root'].name).parent:
+                return None
+            return payloads['kernel'].size
     except (tarfile.TarError, OSError):
         return None
     return None
+
+
+def check_manifest(path, variant):
+    """Check the image's package set, in addition to the input .config."""
+    spec = variants.VARIANTS[variant]
+    packages = {line.split(' - ', 1)[0] for line in path.read_text().splitlines() if line}
+    required = {line.removeprefix('CONFIG_PACKAGE_').removesuffix('=y')
+                for line in spec['required']
+                if line.startswith('CONFIG_PACKAGE_') and line.endswith('=y')
+                and '_INCLUDE_' not in line}
+    forbidden = {line.removeprefix('CONFIG_PACKAGE_').removesuffix('=y')
+                 for line in spec['forbidden'] if line.startswith('CONFIG_PACKAGE_')}
+    prefixes = tuple(p.removeprefix('CONFIG_PACKAGE_')
+                     for p in spec.get('forbidden_prefixes', []))
+    unexpected = (packages & forbidden) | {p for p in packages if p.startswith(prefixes)}
+    missing = required - packages
+    if missing or unexpected:
+        sys.exit(f'{path.name}: missing packages {sorted(missing)}; '
+                 f'forbidden packages {sorted(unexpected)}')
 
 
 def check_kernel(root, variant):
@@ -42,18 +68,26 @@ def check_kernel(root, variant):
         if variant == 'honk':
             sys.exit(f'Expected one kernel .config, found {len(configs)}.')
         return {}
-    text = configs[0].read_text()
+    lines = set(configs[0].read_text().splitlines())
     info = {'kernel_config': str(configs[0].relative_to(root))}
     match = re.search(r'linux-(\d+\.\d+(?:\.\d+)?)', str(configs[0]))
     if match:
         info['kernel_version'] = match.group(1)
     if variant != 'honk':
         return info
-    if 'CONFIG_CGROUP_BPF=y' not in text:
-        sys.exit('The built kernel has no CONFIG_CGROUP_BPF=y; honk cannot start on it.')
-    if 'CONFIG_DEBUG_INFO=y' not in text:
-        sys.exit('The built kernel has no CONFIG_DEBUG_INFO=y; the BTF blob would be useless.')
-    if 'CONFIG_DEBUG_INFO_REDUCED=y' in text:
+    if not match or tuple(map(int, info['kernel_version'].split('.')[:2])) < (6, 12):
+        sys.exit('honk requires a kernel version >= 6.12.')
+    # honk's published startup guide lists these as mandatory for its real
+    # datapath. Detached BTF does not replace TCX, socket hooks or NFQUEUE.
+    required = ('BPF', 'BPF_SYSCALL', 'BPF_JIT', 'CGROUP_BPF', 'NET_SCHED',
+                'NET_CLS_ACT', 'NET_XGRESS', 'NET_NS', 'DEBUG_INFO')
+    missing = [f'CONFIG_{name}=y' for name in required if f'CONFIG_{name}=y' not in lines]
+    for name in ('NF_TABLES', 'NF_TABLES_INET', 'NFT_CT', 'NFT_QUEUE', 'NETFILTER_NETLINK_QUEUE'):
+        if not {f'CONFIG_{name}=y', f'CONFIG_{name}=m'} & lines:
+            missing.append(f'CONFIG_{name}=y|m')
+    if missing:
+        sys.exit('The built kernel lacks honk capabilities: ' + ', '.join(missing))
+    if 'CONFIG_DEBUG_INFO_REDUCED=y' in lines:
         sys.exit('The built kernel uses DEBUG_INFO_REDUCED; pahole cannot produce full BTF.')
     info['cgroup_bpf'] = True
     return info
@@ -103,19 +137,22 @@ def collect(root, destination, variant):
         sys.exit(f'Could not read the kernel size from {", ".join(unreadable)}; '
                  'refusing to publish an unchecked image.')
     measured = max(sizes)
-    if measured >= KERNEL_LIMIT:
+    if measured > KERNEL_LIMIT:
         sys.exit(f'The kernel is {measured / 1048576:.2f} MB but the partition holds '
                  f'{KERNEL_LIMIT / 1048576:.0f} MB; the image would not boot.')
     if measured > KERNEL_LIMIT * 0.95:
         print(f'warning: the kernel is {measured / 1048576:.2f} MB of '
               f'{KERNEL_LIMIT / 1048576:.0f} MB', file=sys.stderr)
 
-    destination.mkdir(parents=True, exist_ok=True)
-    for image in images:
-        shutil.copy2(image, destination / image.name)
     manifests = sorted(images_dir.glob(f'*{variants.DEVICE}*.manifest'))
     if not manifests:
         sys.exit('No installed-package manifest was produced for the Release.')
+    for manifest in manifests:
+        check_manifest(manifest, variant)
+
+    destination.mkdir(parents=True, exist_ok=True)
+    for image in images:
+        shutil.copy2(image, destination / image.name)
     for manifest in manifests:
         shutil.copy2(manifest, destination / manifest.name)
 

@@ -1,4 +1,8 @@
 #!/bin/sh /etc/rc.common
+# rpcd rc.list scans only the first 11 lines for these assignments.
+USE_PROCD=1
+START=99
+STOP=01
 #
 # procd init script for honk-core, adapted from honk/files/honk.init of
 # daeuniverse/openwrt-packages (GPL-3.0-or-later).
@@ -16,15 +20,21 @@
 # honk-core runs as root: its eBPF datapath creates the dae0 link pair and the
 # daens network namespace, attaches TC programs and may open NFQUEUE.
 
-USE_PROCD=1
-START=99
-STOP=01
-
 CONF=honk
 PROG=/usr/bin/honk-core
 
 start_service() {
 	config_load "$CONF"
+
+	# default_postinst enables and starts services after a fresh package install.
+	# uci-defaults runs before that enable, so it cannot keep a live install off.
+	if [ "$pkgname" = "$CONF" ]; then
+		if [ "$PKG_UPGRADE" != 1 ]; then
+			disable
+			return 1
+		fi
+		enabled || return 1
+	fi
 
 	local config_file
 	config_get config_file config config_file "/etc/honk/config.dae"
@@ -44,10 +54,20 @@ start_service() {
 	# eBPF maps must be pinned on bpffs, and OpenWrt does not mount it by
 	# itself. BusyBox has no mountpoint applet, so check /proc/mounts. It is
 	# left mounted on stop because other tools may share it.
-	grep -qs ' /sys/fs/bpf bpf ' /proc/mounts || mount -t bpf bpf /sys/fs/bpf
+	if ! grep -qs ' /sys/fs/bpf bpf ' /proc/mounts; then
+		mkdir -p /sys/fs/bpf && mount -t bpf bpf /sys/fs/bpf || {
+			logger -t honk "cannot mount bpffs"
+			return 1
+		}
+	fi
 
 	# honk requires cgroup v2; mount it if the system has not done so yet.
-	[ -e /sys/fs/cgroup/cgroup.controllers ] || mount -t cgroup2 none /sys/fs/cgroup
+	if [ ! -e /sys/fs/cgroup/cgroup.controllers ]; then
+		mkdir -p /sys/fs/cgroup && mount -t cgroup2 none /sys/fs/cgroup || {
+			logger -t honk "cannot mount cgroup v2"
+			return 1
+		}
+	fi
 
 	# procd runs each instance in /sys/fs/cgroup/services/<service>/<instance>
 	# but enables no controller there, so honk would find no memory.current and
@@ -76,8 +96,17 @@ start_service() {
 reload_service() {
 	config_load "$CONF"
 	procd_running "$CONF" "$CONF" || return 0
-	# honk-core reload reads the instance lock and sends SIGHUP
-	"$PROG" reload
+	local config_file
+	config_get config_file config config_file "/etc/honk/config.dae"
+	if ubus call service list "{\"name\":\"$CONF\"}" 2>/dev/null |
+		jsonfilter -q -e "@.$CONF.instances.$CONF.command[*]" | grep -qxF -- "$config_file"; then
+		# SIGHUP rereads the running instance's original configuration path.
+		"$PROG" reload
+	else
+		# Submitting the new command to procd restarts the instance and keeps
+		# its reload triggers registered, including when the new file is bad.
+		start
+	fi
 }
 
 service_triggers() {

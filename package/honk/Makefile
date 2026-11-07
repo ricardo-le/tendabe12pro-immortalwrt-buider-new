@@ -70,6 +70,16 @@ define Package/honk/conffiles
 /etc/honk/config.dae
 endef
 
+# procd's command path stays the same after replacing the binary. An ordinary
+# post-install start may leave the old process alive, so restart enabled
+# services explicitly, as the upstream OpenWrt package does.
+define Package/honk/postinst
+#!/bin/sh
+[ -z "$${IPKG_INSTROOT}" ] || exit 0
+/etc/init.d/honk enabled && /etc/init.d/honk restart
+exit 0
+endef
+
 define Package/honk/install
 	$(INSTALL_DIR) $(1)/usr/bin
 	$(INSTALL_BIN) $(HONK_BIN) $(1)/usr/bin/honk-core

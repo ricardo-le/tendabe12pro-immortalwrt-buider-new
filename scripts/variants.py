@@ -25,7 +25,12 @@ VARIANTS = {
         ],
         # AdGuardHome is not preinstalled, but it is deliberately NOT forbidden:
         # it can be added back from menuconfig at any time.
-        'forbidden': [],
+        'forbidden': [
+            'CONFIG_PACKAGE_honk=y',
+            'CONFIG_PACKAGE_luci-app-honk=y',
+            'CONFIG_PACKAGE_luci-lib-daeuniverse=y',
+            'CONFIG_PACKAGE_vmlinux-btf-local=y',
+        ],
     },
     'honk': {
         'title': 'honk（无 Passwall）',
@@ -41,6 +46,8 @@ VARIANTS = {
             'CONFIG_PACKAGE_luci-lib-daeuniverse=y',
             'CONFIG_PACKAGE_vmlinux-btf-local=y',
             'CONFIG_PACKAGE_kmod-veth=y',
+            'CONFIG_PACKAGE_kmod-sched-core=y',
+            'CONFIG_PACKAGE_kmod-sched-bpf=y',
             'CONFIG_PACKAGE_kmod-nft-queue=y',
             'CONFIG_PACKAGE_kmod-nfnetlink-queue=y',
             'CONFIG_PACKAGE_v2ray-geoip=y',
@@ -50,6 +57,8 @@ VARIANTS = {
             'CONFIG_PACKAGE_openssh-sftp-server=y',
             'CONFIG_KERNEL_DEBUG_INFO=y',
             '# CONFIG_KERNEL_DEBUG_INFO_REDUCED is not set',
+            '# CONFIG_KERNEL_DEBUG_INFO_BTF is not set',
+            'CONFIG_KERNEL_CGROUPS=y',
             # Kernel/Configure/Default copies CONFIG_KERNEL_* into the kernel
             # .config (awk, stripping the KERNEL_ prefix), so this is the real
             # switch behind CONFIG_CGROUP_BPF, which honk requires.
@@ -90,6 +99,6 @@ PASSWALL_STACK = (
 
 HONK_EXTRA_PACKAGES = (
     'honk', 'vmlinux-btf-local', 'luci-lib-daeuniverse', 'luci-app-honk',
-    'kmod-veth', 'kmod-nft-queue',
+    'kmod-veth', 'kmod-sched-core', 'kmod-sched-bpf', 'kmod-nft-queue',
     'kmod-nfnetlink-queue', 'v2ray-geoip', 'v2ray-geosite',
 )

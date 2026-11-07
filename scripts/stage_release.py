@@ -14,28 +14,64 @@ import pathlib
 import shutil
 import sys
 
+import variants
+
 SKIP = {'SHA256SUMS'}
 
 
-def groups(release_dir):
-    """Return (directory, variant) pairs for both supported layouts.
+def validate(directory, variant):
+    """Reject partial downloads before they enter either assets or notes."""
+    record = json.loads((directory / 'variant.json').read_text())
+    spec = variants.VARIANTS[variant]
+    if record['variant'] != variant or record['payload'] != spec['payload']:
+        raise ValueError('variant/payload metadata does not match the artifact name')
+    images = record['images']
+    if not isinstance(images, list) or not images:
+        raise ValueError('no images listed in variant.json')
+    if any(not isinstance(name, str) or pathlib.Path(name).name != name
+           or variants.DEVICE not in name for name in images):
+        raise ValueError('invalid device image filename')
+    if not any('sysupgrade' in name and name.endswith('.bin') for name in images):
+        raise ValueError('no sysupgrade image listed')
+    required = images + ['immortalwrt-commit.txt', 'source-metadata.json',
+                         f'{spec["payload"]}-release.json']
+    if any(not (directory / name).is_file() or (directory / name).stat().st_size == 0
+           for name in required):
+        raise ValueError('missing or empty firmware/metadata file')
+    if not any(p.is_file() and p.stat().st_size for p in directory.glob('*.manifest')):
+        raise ValueError('missing installed-package manifest')
+    source = json.loads((directory / 'source-metadata.json').read_text())
+    payload = json.loads((directory / f'{spec["payload"]}-release.json').read_text())
+    if source['variant'] != variant or not payload['tag']:
+        raise ValueError('source/payload metadata does not match the variant')
 
-    The publish job downloads each artifact into its own directory. Keep a
-    fallback for a single-artifact pattern download, where download-artifact@v4
-    flattens the files into release/ itself.
-    """
-    groups = [(p, p.name.removeprefix('firmware-'))
-              for p in sorted(release_dir.iterdir()) if p.is_dir()]
+
+def groups(release_dir):
+    """Return complete known variants, accepting fixed and flat layouts."""
+    found = []
+    flat_variant = None
     record = release_dir / 'variant.json'
     if record.is_file():
         try:
-            variant = json.loads(record.read_text())['variant']
-        except (KeyError, json.JSONDecodeError):
-            return groups
-        # Never stage the same variant twice when both layouts are present.
-        if variant not in {name for _, name in groups}:
-            groups.append((release_dir, variant))
-    return groups
+            flat_variant = json.loads(record.read_text())['variant']
+        except (KeyError, TypeError, ValueError, OSError):
+            pass
+    for variant in variants.VARIANTS:
+        candidates = [release_dir / f'firmware-{variant}', release_dir / variant]
+        if flat_variant == variant:
+            candidates.append(release_dir)
+        for directory in candidates:
+            if not directory.is_dir():
+                continue
+            try:
+                validate(directory, variant)
+            except (KeyError, TypeError, ValueError, OSError) as exc:
+                print(f'warning: skipping incomplete {variant} artifact at {directory}: {exc}',
+                      file=sys.stderr)
+                continue
+            found.append((directory, variant))
+            break
+    return found
 
 
 def main(release_dir, upload_dir):
